@@ -1,0 +1,176 @@
+/* General styling */
+body {
+  font-family: Arial, sans-serif;
+  background-color: #F6F4E9;
+  color: #333;
+  margin: 0;
+  padding: 0;
+}
+
+.dropdown {
+  border: 1px solid #ccc;
+  max-height: 150px;
+  overflow-y: auto;
+  list-style-type: none;
+  padding: 0;
+  margin: 10px 0;
+}
+
+.dropdown-item {
+  padding: 10px;
+  cursor: pointer;
+}
+
+.dropdown-item:hover {
+  background-color: #f0f0f0;
+}
+
+.no-offers-message {
+  color: red;
+  text-align: center;
+  font-size: 1.5rem;
+  margin-top: 20px;
+}
+
+
+
+/* Container styling */
+.container {
+  margin: 20px auto;
+  padding: 20px;
+}
+
+
+/* Dropdown styling */
+label {
+  font-size: 18px;
+  margin-bottom: 8px;
+  display: block;
+  margin-top: 20px;
+}
+ .container h1{ 
+  text-align: center;
+ }
+
+select {
+  padding: 10px;
+  font-size: 16px;
+  margin-bottom: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Offers section */
+.offers-section {
+  margin-top: 20px;
+  width: 100%;
+}
+
+.offers-heading {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 20px;
+  color: #444;
+  margin-top: 30px;
+}
+
+/* Cards container */
+.offers-cards-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+/* Offer card styling */
+.offer-card {
+  background-color: #39641D;
+  color: white;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 15px;
+  text-align: left;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease-in-out;
+  max-width: 100%;
+}
+
+.offer-card:hover {
+  transform: translateY(-5px);
+}
+
+.offer-card strong {
+  font-weight: bold;
+  color: white;
+}
+
+.search-dropdown {
+  position: relative;
+}
+
+.search-input {
+  padding: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 800px;
+}
+
+.dropdown-list {
+  position: absolute;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  z-index: 10;
+  width: 100%;
+  max-width: 800px;
+}
+
+/* Styles for the search box and dropdown */
+.search-input {
+  padding: 10px;
+  font-size: 16px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  margin-bottom: 10px;
+  width: 1000px; /* Default width for desktop */
+}
+
+.dropdown-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  position: absolute;
+  background-color: #fff;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  width: 1000px; /* Default width for desktop */
+}
+
+.dropdown-item {
+  padding: 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #ddd;
+}
+
+/* Media query for mobile devices */
+@media (max-width: 768px) {
+  .search-input {
+    width: 200px; /* Width for mobile */
+  }
+
+  .dropdown-list {
+    width: 200px; /* Width for mobile */
+  }
+}
+
+
+
+
+
+
