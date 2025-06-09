@@ -1,10 +1,19 @@
 /* General styling */
 body {
   font-family: Arial, sans-serif;
-  background-color: #F6F4E9;
+  background-color: linear-gradient(to bottom, #999792, #cecdc9);
   color: #333;
   margin: 0;
   padding: 0;
+}
+
+body {
+  @apply min-h-screen;
+  background: linear-gradient(to bottom, #999792, #cecdc9);
+}
+
+.container{
+   background-color: linear-gradient(to bottom, #999792, #cecdc9);
 }
 
 .dropdown {
@@ -38,6 +47,8 @@ body {
 .container {
   margin: 20px auto;
   padding: 20px;
+     background-color: linear-gradient(to bottom, #999792, #cecdc9);
+
 }
 
 
@@ -85,8 +96,8 @@ select {
 
 /* Offer card styling */
 .offer-card {
-  background-color: #39641D;
-  color: white;
+  background-color: #f5f5f5;
+  color: black;
   border: 1px solid #ddd;
   border-radius: 10px;
   padding: 15px;
@@ -96,13 +107,17 @@ select {
   max-width: 100%;
 }
 
+.offers-container p{
+  color: black;
+}
+
 .offer-card:hover {
   transform: translateY(-5px);
 }
 
 .offer-card strong {
   font-weight: bold;
-  color: white;
+  color: black;
 }
 
 .search-dropdown {
@@ -128,7 +143,7 @@ select {
   list-style: none;
   z-index: 10;
   width: 100%;
-  max-width: 800px;
+  max-width: 600px;
 }
 
 /* Styles for the search box and dropdown */
@@ -163,9 +178,282 @@ select {
   .search-input {
     width: 200px; /* Width for mobile */
   }
+  body{
+    overflow-x: hidden;
+  }
 
   .dropdown-list {
     width: 200px; /* Width for mobile */
+  }
+}
+
+/* Base styles */
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 15px;
+}
+
+/* Navbar styles */
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 20px;
+  background-color: #CDD1C1;
+  margin-top: 20px;
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  width: 100px;
+  height: auto;
+  margin-right: 20px;
+}
+
+.links-container {
+  display: flex;
+  gap: 20px;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: black;
+  font-size: 18px;
+  transition: color 0.3s ease;
+}
+
+.nav-link:hover {
+  color: #555;
+}
+
+/* Title container */
+.title-container {
+  background-color: white;
+  padding: 20px;
+  margin: 20px 0;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  text-align: center;
+}
+
+.main-title {
+  color: black;
+  margin: 0;
+}
+
+/* Split section */
+.split-section {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 30px 0;
+  gap: 20px;
+}
+
+.text-section, .image-section {
+  flex: 1 1 45%;
+  min-width: 300px;
+}
+
+.responsive-image {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+/* Search section */
+.search-section {
+  margin: 30px 0;
+  position: relative;
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px 20px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+.dropdown-list {
+  position: absolute;
+  width: 100%;
+  max-height: 300px;
+  overflow-y: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #ddd;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  background-color: white;
+  z-index: 1000;
+}
+
+.dropdown-item {
+  padding: 10px 20px;
+  cursor: pointer;
+}
+
+.dropdown-item:hover {
+  background-color: #f5f5f5;
+}
+
+/* Offers section */
+.offers-section {
+  margin: 30px 0;
+}
+
+.platform-offers {
+  margin-bottom: 30px;
+}
+
+.offers-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.offer-card {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.no-offers-message {
+  color: red;
+  text-align: center;
+  margin: 20px 0;
+}
+
+/* FAQ section */
+.faq-section {
+  margin: 50px 0;
+}
+
+.faq-columns{
+  display: grid;
+grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+gap: 30px;
+}
+
+.faq-title {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.faq-column {
+  flex: 1 1 30%;
+  min-width: 250px;
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  gap: 30px;
+}
+
+/* Mobile styles */
+@media (max-width: 768px) {
+  .navbar {
+    flex-direction: column;
+    padding: 15px;
+  }
+
+  .logo {
+    margin-bottom: 15px;
+    margin-right: 0;
+  }
+
+  .links-container {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .split-section {
+    flex-direction: column;
+  }
+
+  .text-section, .image-section {
+    flex: 1 1 100%;
+  }
+
+  .faq-column {
+    flex: 1 1 100%;
+  }
+
+  .search-input {
+    font-size: 14px;
+  }
+
+  .offers-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Search section */
+.search-section {
+  margin: 30px 0;
+  position: relative;
+  width: 100%;
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px 20px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+/* Offers section */
+.offers-section {
+  margin: 30px 0;
+  width: 100%;
+}
+
+.platform-offers {
+  margin-bottom: 30px;
+}
+
+.offers-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.offer-card {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Mobile styles */
+@media (max-width: 768px) {
+  .search-section {
+    padding: 0 15px;
+  }
+  
+  .offers-section {
+    padding: 0 15px;
+  }
+  
+  .offers-container {
+    grid-template-columns: 1fr;
   }
 }
 
