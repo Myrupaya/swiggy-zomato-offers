@@ -402,10 +402,12 @@ gap: 30px;
 
   .dropdown-list{
     width: 90%;
+    margin-right: 5px;
   }
 
   .offers-container {
     grid-template-columns: 1fr;
+    margin-right: 5px;
   }
 }
 
