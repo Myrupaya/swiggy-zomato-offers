@@ -153,23 +153,6 @@ const CreditCardDropdown = () => {
 
   return (
     <div className="container">
-      {/* Navbar Component - Same as before */}
-      <nav className="navbar">
-        <div className="logo-container">
-          <a href="https://www.myrupaya.in/">
-            <img
-              src="https://static.wixstatic.com/media/f836e8_26da4bf726c3475eabd6578d7546c3b2~mv2.jpg/v1/crop/x_124,y_0,w_3152,h_1458/fill/w_909,h_420,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/dark_logo_white_background.jpg"
-              alt="MyRupaya Logo"
-              className="logo"
-            />
-          </a>
-          <div className="links-container">
-            <a href="https://www.myrupaya.in/" className="nav-link">
-              Home
-            </a>
-          </div>
-        </div>
-      </nav>
 
       {/* Title in white container box */}
       <div className="title-container">
@@ -262,33 +245,6 @@ const CreditCardDropdown = () => {
   </div>
 )}
 
-      {/* FAQ section with 3 columns */}
-      <div className="faq-section">
-        <h2 className="faq-title">Frequently Asked Questions</h2>
-        <div className="faq-columns">
-          <div className="faq-column">
-            <h3>How do I use these offers?</h3>
-            <p>
-              Simply search for your credit card, find the offer you want to use,
-              and apply the coupon code during checkout on Swiggy or Zomato.
-            </p>
-          </div>
-          <div className="faq-column">
-            <h3>Are these offers valid for all users?</h3>
-            <p>
-              Most offers are valid for all users with the specified credit card,
-              but some may have additional terms and conditions.
-            </p>
-          </div>
-          <div className="faq-column">
-            <h3>How often are offers updated?</h3>
-            <p>
-              We regularly update our database with new offers. Check back
-              frequently for the latest promotions.
-            </p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };
