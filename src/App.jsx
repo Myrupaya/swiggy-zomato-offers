@@ -154,29 +154,7 @@ const CreditCardDropdown = () => {
   return (
     <div className="container">
 
-      {/* Title in white container box */}
-      <div className="title-container">
-        <h1 className="main-title">Swiggy-Zomato Offers</h1>
-      </div>
 
-      {/* 50-50 split section */}
-      <div className="split-section">
-        <div className="text-section">
-          <h2>Find the best food delivery offers</h2>
-          <p>
-            Discover exclusive credit card offers for Swiggy and Zomato. 
-            Search for your credit card to see available discounts and promo codes 
-            that can help you save money on your food delivery orders.
-          </p>
-        </div>
-        <div className="image-section">
-          <img 
-            src="" 
-            alt="Food Delivery"
-            className="responsive-image"
-          />
-        </div>
-      </div>
 
 
 {/* Search and dropdown section */}
