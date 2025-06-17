@@ -1,7 +1,6 @@
 /* General styling */
 body {
   font-family: Arial, sans-serif;
-  background-color: linear-gradient(to bottom, #999792, #cecdc9);
   color: #333;
   margin: 0;
   padding: 0;
@@ -9,11 +8,14 @@ body {
 
 body {
   @apply min-h-screen;
-  background: linear-gradient(to bottom, #999792, #cecdc9);
+  background: linear-gradient(135deg, #F8F9FA 3%, #E9ECEF 100%, #CECDC9 100%);
+
 }
 
 .container{
-   background-color: linear-gradient(to bottom, #999792, #cecdc9);
+  @apply min-h-screen;
+  background: linear-gradient(135deg, #F8F9FA 3%, #E9ECEF 100%, #CECDC9 100%);
+
 }
 
 .dropdown {
