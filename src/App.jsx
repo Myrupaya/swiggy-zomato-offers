@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import Papa from "papaparse";
 import "./App.css";
 
@@ -110,20 +110,13 @@ const CreditCardDropdown = () => {
   const [allCardsList, setAllCardsList] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filteredCards, setFilteredCards] = useState([]);
-  const [selectedCard, setSelectedCard] = useState("");
+  const [selectedCard, setSelectedCard] = useState(null);
   const [swiggyOffers, setSwiggyOffers] = useState([]);
   const [zomatoOffers, setZomatoOffers] = useState([]);
   const [noOffersMessage, setNoOffersMessage] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+   const [cardsLoaded, setCardsLoaded] = useState(false);
 
   // Check screen width to detect if it's mobile
   useEffect(() => {
@@ -228,71 +221,83 @@ const CreditCardDropdown = () => {
         ).values());
 
         setCreditCards(uniqueCards);
-        setAllCardsList(allCards);
-      } catch (error) {
-        console.error("Error fetching or parsing CSV files:", error);
-      }
-    };
+      setAllCardsList(allCards);
+      setCardsLoaded(true); 
+    } catch (error) {
+      console.error("Error fetching or parsing CSV files:", error);
+      setCardsLoaded(true); // Still mark as loaded even if error
+    }
+  };
 
     fetchData();
   }, []);
 
-  // Fetch offers based on selected card
-  const fetchOffers = async (card) => {
-    const fetchAndParseCSV = (filePath) =>
-      new Promise((resolve, reject) => {
-        Papa.parse(filePath, {
-          download: true,
-          header: true,
-          complete: (results) => resolve(results.data),
-          error: (error) => reject(error),
-        });
+// Fetch offers based on selected card
+const fetchOffers = async (card) => {
+  const fetchAndParseCSV = (filePath) =>
+    new Promise((resolve, reject) => {
+      Papa.parse(filePath, {
+        download: true,
+        header: true,
+        complete: (results) => resolve(results.data),
+        error: (error) => reject(error),
       });
+    });
 
-    const filterOffers = (data, card) =>
-      data
-        .filter((row) => {
-          if (!row["Applicable to Credit cards"]) return false;
+  const filterOffers = (data, card) =>
+    data
+      .filter((row) => {
+        if (!row["Applicable to Credit cards"]) return false;
+        
+        const rowCards = row["Applicable to Credit cards"]
+          .split(",")
+          .map(c => normalizeCardName(c.trim()));
           
-          const rowCards = row["Applicable to Credit cards"]
-            .split(",")
-            .map(c => normalizeCardName(c.trim()));
-            
-          return rowCards.some(rowCard => {
-            const rowBase = getBaseCardName(rowCard);
-            const rowNetwork = getNetworkVariant(rowCard);
-            
-            // Match if base name matches and network is either not specified or matches
-            return rowBase === card.baseName && 
-                   (!rowNetwork || !card.network || rowNetwork === card.network);
-          });
-        })
-        .map((row) => ({
-          offer: row["Offer"],
-          coupon: row["Coupon code"],
-        }));
+        return rowCards.some(rowCard => {
+          const rowBase = getBaseCardName(rowCard);
+          const rowNetwork = getNetworkVariant(rowCard);
+          
+          // Match if base name matches and network is either not specified or matches
+          return rowBase === card.baseName && 
+                 (!rowNetwork || !card.network || rowNetwork === card.network);
+        });
+      })
+      .map((row) => ({
+        offer: row["Offer"],
+        coupon: row["Coupon code"],
+      }));
 
-    try {
-      const [swiggyData, zomatoData] = await Promise.all([
-        fetchAndParseCSV("/Swiggy.csv"),
-        fetchAndParseCSV("/Zomato.csv"),
-      ]);
+  try {
+    const [swiggyData, zomatoData] = await Promise.all([
+      fetchAndParseCSV("/Swiggy.csv"),
+      fetchAndParseCSV("/Zomato.csv"),
+    ]);
 
-      const swiggyFiltered = filterOffers(swiggyData, card);
-      const zomatoFiltered = filterOffers(zomatoData, card);
+    const swiggyFiltered = filterOffers(swiggyData, card);
+    const zomatoFiltered = filterOffers(zomatoData, card);
 
-      setSwiggyOffers(swiggyFiltered);
-      setZomatoOffers(zomatoFiltered);
+    setSwiggyOffers(swiggyFiltered);
+    setZomatoOffers(zomatoFiltered);
 
-      if (swiggyFiltered.length === 0 && zomatoFiltered.length === 0) {
+    // Check if the card exists in our database
+    const cardInDatabase = creditCards.some(c => 
+      c.fullName.toLowerCase() === card.fullName.toLowerCase()
+    );
+
+    if (swiggyFiltered.length === 0 && zomatoFiltered.length === 0) {
+      if (cardInDatabase) {
         setNoOffersMessage("No offers found for this card.");
       } else {
-        setNoOffersMessage("");
+        setNoOffersMessage("Card not found in our database. Please try another name.");
       }
-    } catch (error) {
-      console.error("Error fetching or filtering offers:", error);
+    } else {
+      setNoOffersMessage("");
     }
-  };
+  } catch (error) {
+    console.error("Error fetching or filtering offers:", error);
+    setNoOffersMessage("Error fetching offers. Please try again.");
+  }
+};
 
   // Handle search input
   const handleSearchChange = (e) => {
@@ -300,7 +305,7 @@ const CreditCardDropdown = () => {
     setSearchTerm(value);
     
     // Clear existing offers and selection when typing
-    setSelectedCard("");
+    setSelectedCard(null);
     setSwiggyOffers([]);
     setZomatoOffers([]);
     setNoOffersMessage("");
@@ -321,10 +326,6 @@ const CreditCardDropdown = () => {
       .slice(0, 10); // Limit to top 10 results
 
     setFilteredCards(matchingCards);
-
-    if (matchingCards.length === 0) {
-      setNoOffersMessage("No matching cards found. Try a different spelling.");
-    }
   };
 
   // Handle card selection
@@ -338,43 +339,46 @@ const CreditCardDropdown = () => {
     fetchOffers(card);
   };
 
-  // Handle search submission (Enter key or blur)
-  const handleSearchSubmit = () => {
-    const term = searchTerm.trim();
-    if (!term) return;
-    
-    // Skip if we already have a selected card
-    if (selectedCard) return;
-
-    // Try to find best match in all credit cards
-    const matchingCards = creditCards
-      .map(card => ({
-        ...card,
-        score: getMatchScore(term, card.fullName)
-      }))
-      .filter(card => card.score > 0.3)
-      .sort((a, b) => b.score - a.score);
-
-    if (matchingCards.length > 0) {
-      // Select the best match
-      handleCardSelect(matchingCards[0]);
-    } else {
-      // No card found after full fuzzy search
-      setSelectedCard(null);
-      setSwiggyOffers([]);
-      setZomatoOffers([]);
-      setNoOffersMessage("No offers found for this card. Please check the card name and try again.");
+  // Handle Enter key press
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      
+      // If there are filtered cards, select the top match
+      if (filteredCards.length > 0) {
+        handleCardSelect(filteredCards[0]);
+      } 
+      // If no cards match but search term exists
+      else if (searchTerm.trim() !== '') {
+        // Check if card exists in our database
+        const cardExists = creditCards.some(card => 
+          card.fullName.toLowerCase() === searchTerm.toLowerCase().trim()
+        );
+        
+        if (cardExists) {
+          // This card exists but we didn't find any offers
+          setNoOffersMessage("No offers found for this card.");
+        } else {
+          // Card doesn't exist in our database
+          setNoOffersMessage("Card not found. Please try another name.");
+        }
+        
+        // Clear any previous selection
+        setSelectedCard(null);
+        setSwiggyOffers([]);
+        setZomatoOffers([]);
+      }
     }
   };
 
-  // Handle blur event with timeout
-  const handleBlur = () => {
-    setTimeout(() => {
-      if (mountedRef.current && !selectedCard && searchTerm.trim()) {
-        handleSearchSubmit();
-      }
-    }, 200);
-  };
+  // Auto-detect when no cards match the search
+  useEffect(() => {
+    if (searchTerm.trim() !== '' && 
+        filteredCards.length === 0 && 
+        !selectedCard) {
+      setNoOffersMessage("Card not found. Please try another name.");
+    }
+  }, [searchTerm, filteredCards, selectedCard]);
 
   return (
     <div className="container">
@@ -385,12 +389,7 @@ const CreditCardDropdown = () => {
             type="text"
             value={searchTerm}
             onChange={handleSearchChange}
-            onBlur={handleBlur}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                handleSearchSubmit();
-              }
-            }}
+            onKeyDown={handleKeyDown}
             placeholder="Search your credit card..."
             className="search-input"
           />
@@ -411,9 +410,12 @@ const CreditCardDropdown = () => {
         </div>
       </div>
 
-      {/* Offers display section */}
-      {noOffersMessage && (
-        <p className="no-offers-message" style={{ textAlign: 'center' }}>
+ {noOffersMessage && (
+        <p className="no-offers-message" style={{ 
+          textAlign: 'center', 
+          color: noOffersMessage.includes("not found") ? '#ff0000' : 'inherit',
+          fontWeight: noOffersMessage.includes("not found") ? 'bold' : 'normal'
+        }}>
           {noOffersMessage}
         </p>
       )}

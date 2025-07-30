@@ -8,12 +8,8 @@ body {
 
 body {
   background: linear-gradient(135deg, #F8F9FA 3%, #E9ECEF 100%, #CECDC9 100%);
-
 }
 
-.container{
-  background: linear-gradient(135deg, #F8F9FA 3%, #E9ECEF 100%, #CECDC9 100%);
-}
 
  .bottom-disclaimer{text-align: center;
           padding: 20px;
@@ -27,11 +23,6 @@ body {
   }
 }
 
-.container{
-  @apply min-h-screen;
-  background: linear-gradient(135deg, #F8F9FA 3%, #E9ECEF 100%, #CECDC9 100%);
-
-}
 
 .dropdown {
   border: 1px solid #ccc;
@@ -64,7 +55,7 @@ body {
 .container {
   margin: 20px auto;
   padding: 20px;
-     background-color: linear-gradient(to bottom, #999792, #cecdc9);
+    
 
 }
 
