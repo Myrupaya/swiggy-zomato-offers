@@ -7,9 +7,24 @@ body {
 }
 
 body {
-  @apply min-h-screen;
   background: linear-gradient(135deg, #F8F9FA 3%, #E9ECEF 100%, #CECDC9 100%);
 
+}
+
+.container{
+  background: linear-gradient(135deg, #F8F9FA 3%, #E9ECEF 100%, #CECDC9 100%);
+}
+
+ .bottom-disclaimer{text-align: center;
+          padding: 20px;
+          max-width: 1000px;
+          margin: 0 auto;
+        }
+
+        @media (max-width: 768px) {
+  .bottom-disclaimer {
+    font-size: 14px; /* Adjust as needed */
+  }
 }
 
 .container{
@@ -455,12 +470,12 @@ gap: 30px;
 /* Mobile styles */
 @media (max-width: 768px) {
   .search-section {
-    padding: 0 15px;
+    margin-right: 15px;
   }
   
-  .offers-section {
-    padding: 0 15px;
-  }
+ .dropdown-list{
+  width: 100%;
+ }
   
   .offers-container {
     grid-template-columns: 1fr;
