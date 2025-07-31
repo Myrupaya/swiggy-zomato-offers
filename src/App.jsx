@@ -176,19 +176,38 @@ const CreditCardDropdown = () => {
       return cards;
     };
 
+    const extractAllCards = (data) => {
+      const cards = [];
+      data.forEach((row) => {
+        const cardName = row["Applicable to Credit cards"];
+        if (cardName) {
+          const normalized = normalizeCardName(cardName);
+          cards.push({
+            fullName: normalized,
+            baseName: getBaseCardName(normalized),
+            network: getNetworkVariant(normalized),
+            isAllCardsOnly: true
+          });
+        }
+      });
+      return cards;
+    };
+
     const fetchData = async () => {
       try {
-        const [swiggyData, zomatoData, eatsureData] = await Promise.all([
+        const [swiggyData, zomatoData, eatsureData, allCardsData] = await Promise.all([
           fetchAndParseCSV("/Swiggy.csv"),
           fetchAndParseCSV("/Zomato.csv"),
-          fetchAndParseCSV("/Eatsure.csv")
+          fetchAndParseCSV("/Eatsure.csv"),
+          fetchAndParseCSV("/All Cards.csv")
         ]);
 
         const swiggyCards = extractCreditCards(swiggyData);
         const zomatoCards = extractCreditCards(zomatoData);
         const eatsureCards = extractCreditCards(eatsureData);
+        const allCardsList = extractAllCards(allCardsData);
 
-        const allCardsCombined = [...swiggyCards, ...zomatoCards, ...eatsureCards];
+        const allCardsCombined = [...swiggyCards, ...zomatoCards, ...eatsureCards, ...allCardsList];
         
         const uniqueCards = Array.from(new Map(
           allCardsCombined.map(card => [card.fullName, card])
@@ -235,7 +254,6 @@ const CreditCardDropdown = () => {
           });
         })
         .map((row) => {
-          // Format based on platform
           switch(platform) {
             case "Eatsure":
               return {
@@ -281,12 +299,15 @@ const CreditCardDropdown = () => {
         Zomato: zomatoOffers
       });
 
-      const cardInDatabase = creditCards.some(c => 
-        c.fullName.toLowerCase() === card.fullName.toLowerCase()
-      );
+      const isAllCardsOnly = card.isAllCardsOnly && 
+        eatsureOffers.length === 0 && 
+        swiggyOffers.length === 0 && 
+        zomatoOffers.length === 0;
 
-      if (eatsureOffers.length === 0 && swiggyOffers.length === 0 && zomatoOffers.length === 0) {
-        if (cardInDatabase) {
+      if (eatsureOffers.length === 0 && 
+          swiggyOffers.length === 0 && 
+          zomatoOffers.length === 0) {
+        if (isAllCardsOnly) {
           setNoOffersMessage("No offers found for this card.");
         } else {
           setNoOffersMessage("Card not found in our database. Please try another name.");
@@ -298,6 +319,17 @@ const CreditCardDropdown = () => {
       console.error("Error fetching or filtering offers:", error);
       setNoOffersMessage("Error fetching offers. Please try again.");
     }
+  };
+
+  // Check if card exists in database
+  const cardExists = (cardName) => {
+    const normalized = normalizeCardName(cardName);
+    const baseName = getBaseCardName(normalized);
+    
+    return creditCards.some(card => 
+      card.fullName === normalized || 
+      card.baseName === baseName
+    );
   };
 
   // Handle search input
@@ -319,11 +351,16 @@ const CreditCardDropdown = () => {
         ...card,
         score: getMatchScore(value, card.fullName)
       }))
-      .filter(card => card.score > 0.3)
+      .filter(card => card.score > 40)
       .sort((a, b) => b.score - a.score)
       .slice(0, 10);
 
     setFilteredCards(matchingCards);
+    
+    // Show error if no matches found and card doesn't exist
+    if (matchingCards.length === 0 && !cardExists(value)) {
+      setNoOffersMessage("Card not found in our database. Please try another name.");
+    }
   };
 
   // Handle card selection
@@ -340,32 +377,32 @@ const CreditCardDropdown = () => {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      setNoOffersMessage("");
+      setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
+
       if (filteredCards.length > 0) {
         handleCardSelect(filteredCards[0]);
       } else if (searchTerm.trim() !== '') {
-        const cardExists = creditCards.some(card => 
-          card.fullName.toLowerCase() === searchTerm.toLowerCase().trim()
-        );
-        
-        if (cardExists) {
-          setNoOffersMessage("No offers found for this card.");
-        } else {
-          setNoOffersMessage("Card not found. Please try another name.");
+        if (!cardExists(searchTerm)) {
+          setSelectedCard(null);
+          setNoOffersMessage("Card not found in our database. Please try another name.");
+          return;
         }
         
-        setSelectedCard(null);
-        setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
+        // Create normalized card object
+        const normalizedInput = normalizeCardName(searchTerm.trim());
+        const dummyCard = {
+          fullName: normalizedInput,
+          baseName: getBaseCardName(normalizedInput),
+          network: getNetworkVariant(normalizedInput),
+          isAllCardsOnly: true
+        };
+        
+        setSelectedCard(dummyCard);
+        fetchOffers(dummyCard);
       }
     }
   };
-
-  useEffect(() => {
-    if (searchTerm.trim() !== '' && 
-        filteredCards.length === 0 && 
-        !selectedCard) {
-      setNoOffersMessage("Card not found. Please try another name.");
-    }
-  }, [searchTerm, filteredCards, selectedCard]);
 
   // Render offer cards based on platform
   const renderOfferCards = () => {
@@ -397,8 +434,14 @@ const CreditCardDropdown = () => {
                   <>
                     <p><strong>Offer Title:</strong> {offer.title}</p>
                     <p><strong>Description:</strong> {offer.description}</p>
-                    <p><strong>Terms:</strong> {offer.terms}</p>
-                    <p><strong>Coupon Code:</strong> {offer.coupon}</p>
+                    <p><strong>Terms & Conditions:</strong> {offer.terms}</p>
+                    <p><strong>Coupon Code:</strong> {offer.coupon} <button 
+                        onClick={() => copyToClipboard(offer.coupon)}
+                        className="copy-button"
+                      >
+                        📋
+                      </button></p>
+                    
                     {offer.link && (
                       <a 
                         href={offer.link} 
@@ -417,7 +460,7 @@ const CreditCardDropdown = () => {
                     <p><strong>Offer:</strong> {offer.offer}</p>
                     <div className="terms-container">
                       <strong>Terms & Conditions:</strong>
-                      <div className="scrollable-terms">
+                      <div>
                         {offer.terms}
                       </div>
                     </div>
@@ -471,8 +514,10 @@ const CreditCardDropdown = () => {
       {noOffersMessage && (
         <p className="no-offers-message" style={{ 
           textAlign: 'center', 
-          color: noOffersMessage.includes("not found") ? '#ff0000' : 'inherit',
-          fontWeight: noOffersMessage.includes("not found") ? 'bold' : 'normal'
+          color: noOffersMessage.includes("not found") ? '#FF0000' : 'inherit',
+          fontWeight: noOffersMessage.includes("not found") ? 'bold' : 'normal',
+          margin: '20px auto',
+          maxWidth: '600px'
         }}>
           {noOffersMessage}
         </p>

@@ -542,6 +542,14 @@ gap: 30px;
   }
 }
 
+/* Add this to your App.css */
+.no-offers-message {
+  padding: 15px;
+ color: red;
+  margin-top: 20px;
+  font-size: 16px;
+}
+
 
 
 
