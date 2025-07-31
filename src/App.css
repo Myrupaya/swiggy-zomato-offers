@@ -474,6 +474,75 @@ gap: 30px;
 }
 
 
+/* Add these styles to your App.css file */
+
+/* Copy button styling */
+.copy-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  margin-left: 8px;
+  font-size: 16px;
+  padding: 4px;
+}
+
+/* Offer link styling */
+.offer-link {
+  display: inline-block;
+  padding: 8px 15px;
+  background-color: #1e7145;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  margin-top: 10px;
+  transition: background-color 0.3s;
+}
+
+.offer-link:hover {
+  background-color: #155732;
+}
+
+/* Terms & conditions container */
+.terms-container {
+  margin: 10px 0;
+}
+
+.scrollable-terms {
+  max-height: 100px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  padding: 8px;
+  border-radius: 4px;
+  margin-top: 5px;
+  font-size: 14px;
+}
+
+/* Offer card styling */
+.offer-card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Scroll button styling */
+.scroll-button {
+  /* Styles defined in JSX */
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .offer-card {
+    padding: 10px;
+  }
+  
+  .scrollable-terms {
+    max-height: 80px;
+  }
+}
+
+
 
 
 

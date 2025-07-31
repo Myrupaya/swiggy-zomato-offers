@@ -25,7 +25,6 @@ const getNetworkVariant = (name) => {
 };
 
 // Fuzzy matching utility functions
-// Updated Levenshtein distance calculation
 const levenshteinDistance = (a, b) => {
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
@@ -51,20 +50,15 @@ const levenshteinDistance = (a, b) => {
   return matrix[b.length][a.length];
 };
 
-// Enhanced fuzzy matching with multiple strategies
 const getMatchScore = (query, card) => {
   if (!query || !card) return 0;
   
   const q = query.trim().toLowerCase();
   const c = card.trim().toLowerCase();
   
-  // Strategy 1: Exact match (highest priority)
   if (c === q) return 100;
-  
-  // Strategy 2: Substring match
   if (c.includes(q)) return 90;
   
-  // Strategy 3: Word-based matching
   const qWords = q.split(/\s+/);
   const cWords = c.split(/\s+/);
   
@@ -72,7 +66,6 @@ const getMatchScore = (query, card) => {
     cWords.some(cWord => cWord.includes(qWord))
   ).length;
   
-  // Strategy 4: Fuzzy word matching
   const fuzzyWordMatches = qWords.filter(qWord => 
     cWords.some(cWord => {
       const distance = levenshteinDistance(qWord, cWord);
@@ -81,12 +74,10 @@ const getMatchScore = (query, card) => {
     })
   ).length;
   
-  // Strategy 5: Overall similarity
   const distance = levenshteinDistance(q, c);
   const maxLen = Math.max(q.length, c.length);
   const similarity = 1 - (distance / maxLen);
   
-  // Combine scores (prioritize word matches)
   return (
     (wordMatches / qWords.length) * 0.5 +
     (fuzzyWordMatches / qWords.length) * 0.3 +
@@ -107,18 +98,19 @@ const highlightMatch = (text, query) => {
 
 const CreditCardDropdown = () => {
   const [creditCards, setCreditCards] = useState([]);
-  const [allCardsList, setAllCardsList] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filteredCards, setFilteredCards] = useState([]);
   const [selectedCard, setSelectedCard] = useState(null);
-  const [swiggyOffers, setSwiggyOffers] = useState([]);
-  const [zomatoOffers, setZomatoOffers] = useState([]);
+  const [platformOffers, setPlatformOffers] = useState({
+    Eatsure: [],
+    Swiggy: [],
+    Zomato: []
+  });
   const [noOffersMessage, setNoOffersMessage] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
-   const [cardsLoaded, setCardsLoaded] = useState(false);
+  const [cardsLoaded, setCardsLoaded] = useState(false);
 
-  // Check screen width to detect if it's mobile
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth <= 768);
@@ -132,17 +124,22 @@ const CreditCardDropdown = () => {
     };
   }, []);
 
-  // Determine if we should show scroll button
   useEffect(() => {
-    const hasOffers = swiggyOffers.length > 0 || zomatoOffers.length > 0;
+    const hasOffers = Object.values(platformOffers).some(offers => offers.length > 0);
     setShowScrollButton(hasOffers);
-  }, [swiggyOffers, zomatoOffers]);
+  }, [platformOffers]);
 
-  // Scroll handler function
   const handleScrollDown = () => {
     window.scrollBy({
       top: window.innerHeight,
       behavior: "smooth"
+    });
+  };
+
+  // Copy coupon to clipboard
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text).then(() => {
+      alert("Coupon copied to clipboard!");
     });
   };
 
@@ -179,135 +176,137 @@ const CreditCardDropdown = () => {
       return cards;
     };
 
-    const fetchAllCardsList = async () => {
-      try {
-        const data = await fetchAndParseCSV("/All Cards.csv");
-        const cards = [];
-        data.forEach((row) => {
-          const cardName = row["Applicable to Credit cards"];
-          if (cardName) {
-            const normalized = normalizeCardName(cardName);
-            cards.push({
-              fullName: normalized,
-              baseName: getBaseCardName(normalized),
-              network: getNetworkVariant(normalized)
-            });
-          }
-        });
-        return cards;
-      } catch (error) {
-        console.error("Error fetching All Cards:", error);
-        return [];
-      }
-    };
-
     const fetchData = async () => {
       try {
-        const [swiggyData, zomatoData, allCards] = await Promise.all([
+        const [swiggyData, zomatoData, eatsureData] = await Promise.all([
           fetchAndParseCSV("/Swiggy.csv"),
           fetchAndParseCSV("/Zomato.csv"),
-          fetchAllCardsList()
+          fetchAndParseCSV("/Eatsure.csv")
         ]);
 
         const swiggyCards = extractCreditCards(swiggyData);
         const zomatoCards = extractCreditCards(zomatoData);
+        const eatsureCards = extractCreditCards(eatsureData);
 
-        // Combine all cards from different sources
-        const allCardsCombined = [...swiggyCards, ...zomatoCards, ...allCards];
+        const allCardsCombined = [...swiggyCards, ...zomatoCards, ...eatsureCards];
         
-        // Remove duplicates based on full name
         const uniqueCards = Array.from(new Map(
           allCardsCombined.map(card => [card.fullName, card])
         ).values());
 
         setCreditCards(uniqueCards);
-      setAllCardsList(allCards);
-      setCardsLoaded(true); 
-    } catch (error) {
-      console.error("Error fetching or parsing CSV files:", error);
-      setCardsLoaded(true); // Still mark as loaded even if error
-    }
-  };
+        setCardsLoaded(true); 
+      } catch (error) {
+        console.error("Error fetching or parsing CSV files:", error);
+        setCardsLoaded(true);
+      }
+    };
 
     fetchData();
   }, []);
 
-// Fetch offers based on selected card
-const fetchOffers = async (card) => {
-  const fetchAndParseCSV = (filePath) =>
-    new Promise((resolve, reject) => {
-      Papa.parse(filePath, {
-        download: true,
-        header: true,
-        complete: (results) => resolve(results.data),
-        error: (error) => reject(error),
-      });
-    });
-
-  const filterOffers = (data, card) =>
-    data
-      .filter((row) => {
-        if (!row["Applicable to Credit cards"]) return false;
-        
-        const rowCards = row["Applicable to Credit cards"]
-          .split(",")
-          .map(c => normalizeCardName(c.trim()));
-          
-        return rowCards.some(rowCard => {
-          const rowBase = getBaseCardName(rowCard);
-          const rowNetwork = getNetworkVariant(rowCard);
-          
-          // Match if base name matches and network is either not specified or matches
-          return rowBase === card.baseName && 
-                 (!rowNetwork || !card.network || rowNetwork === card.network);
+  // Fetch offers based on selected card
+  const fetchOffers = async (card) => {
+    const fetchAndParseCSV = (filePath) =>
+      new Promise((resolve, reject) => {
+        Papa.parse(filePath, {
+          download: true,
+          header: true,
+          complete: (results) => resolve(results.data),
+          error: (error) => reject(error),
         });
-      })
-      .map((row) => ({
-        offer: row["Offer"],
-        coupon: row["Coupon code"],
-      }));
+      });
 
-  try {
-    const [swiggyData, zomatoData] = await Promise.all([
-      fetchAndParseCSV("/Swiggy.csv"),
-      fetchAndParseCSV("/Zomato.csv"),
-    ]);
+    const filterOffers = (data, card, platform) => {
+      const offers = data
+        .filter((row) => {
+          if (!row["Applicable to Credit cards"]) return false;
+          
+          const rowCards = row["Applicable to Credit cards"]
+            .split(",")
+            .map(c => normalizeCardName(c.trim()));
+            
+          return rowCards.some(rowCard => {
+            const rowBase = getBaseCardName(rowCard);
+            const rowNetwork = getNetworkVariant(rowCard);
+            
+            return rowBase === card.baseName && 
+                   (!rowNetwork || !card.network || rowNetwork === card.network);
+          });
+        })
+        .map((row) => {
+          // Format based on platform
+          switch(platform) {
+            case "Eatsure":
+              return {
+                description: row["Description"],
+                coupon: row["Coupon Code"]
+              };
+            case "Swiggy":
+              return {
+                title: row["Offer Title"],
+                description: row["Offer Description"],
+                terms: row["Terms and Conditions"],
+                coupon: row["Offer Code"],
+                link: row["Link to Apply Coupon"]
+              };
+            case "Zomato":
+              return {
+                offer: row["Offer"],
+                terms: row["Terms and Conditions"],
+                coupon: row["Coupon Code"]
+              };
+            default:
+              return {};
+          }
+        });
+      
+      return offers;
+    };
 
-    const swiggyFiltered = filterOffers(swiggyData, card);
-    const zomatoFiltered = filterOffers(zomatoData, card);
+    try {
+      const [swiggyData, zomatoData, eatsureData] = await Promise.all([
+        fetchAndParseCSV("/Swiggy.csv"),
+        fetchAndParseCSV("/Zomato.csv"),
+        fetchAndParseCSV("/Eatsure.csv")
+      ]);
 
-    setSwiggyOffers(swiggyFiltered);
-    setZomatoOffers(zomatoFiltered);
+      const swiggyOffers = filterOffers(swiggyData, card, "Swiggy");
+      const zomatoOffers = filterOffers(zomatoData, card, "Zomato");
+      const eatsureOffers = filterOffers(eatsureData, card, "Eatsure");
 
-    // Check if the card exists in our database
-    const cardInDatabase = creditCards.some(c => 
-      c.fullName.toLowerCase() === card.fullName.toLowerCase()
-    );
+      setPlatformOffers({
+        Eatsure: eatsureOffers,
+        Swiggy: swiggyOffers,
+        Zomato: zomatoOffers
+      });
 
-    if (swiggyFiltered.length === 0 && zomatoFiltered.length === 0) {
-      if (cardInDatabase) {
-        setNoOffersMessage("No offers found for this card.");
+      const cardInDatabase = creditCards.some(c => 
+        c.fullName.toLowerCase() === card.fullName.toLowerCase()
+      );
+
+      if (eatsureOffers.length === 0 && swiggyOffers.length === 0 && zomatoOffers.length === 0) {
+        if (cardInDatabase) {
+          setNoOffersMessage("No offers found for this card.");
+        } else {
+          setNoOffersMessage("Card not found in our database. Please try another name.");
+        }
       } else {
-        setNoOffersMessage("Card not found in our database. Please try another name.");
+        setNoOffersMessage("");
       }
-    } else {
-      setNoOffersMessage("");
+    } catch (error) {
+      console.error("Error fetching or filtering offers:", error);
+      setNoOffersMessage("Error fetching offers. Please try again.");
     }
-  } catch (error) {
-    console.error("Error fetching or filtering offers:", error);
-    setNoOffersMessage("Error fetching offers. Please try again.");
-  }
-};
+  };
 
   // Handle search input
   const handleSearchChange = (e) => {
     const value = e.target.value;
     setSearchTerm(value);
     
-    // Clear existing offers and selection when typing
     setSelectedCard(null);
-    setSwiggyOffers([]);
-    setZomatoOffers([]);
+    setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
     setNoOffersMessage("");
 
     if (value === "") {
@@ -315,15 +314,14 @@ const fetchOffers = async (card) => {
       return;
     }
 
-    // Use fuzzy matching to find relevant cards
     const matchingCards = creditCards
       .map(card => ({
         ...card,
         score: getMatchScore(value, card.fullName)
       }))
-      .filter(card => card.score > 0.3)  // Threshold for relevance
-      .sort((a, b) => b.score - a.score) // Sort by best match first
-      .slice(0, 10); // Limit to top 10 results
+      .filter(card => card.score > 0.3)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
 
     setFilteredCards(matchingCards);
   };
@@ -333,8 +331,7 @@ const fetchOffers = async (card) => {
     setSelectedCard(card);
     setSearchTerm(card.fullName);
     setFilteredCards([]);
-    setSwiggyOffers([]);
-    setZomatoOffers([]);
+    setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
     setNoOffersMessage("");
     fetchOffers(card);
   };
@@ -343,35 +340,25 @@ const fetchOffers = async (card) => {
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      
-      // If there are filtered cards, select the top match
       if (filteredCards.length > 0) {
         handleCardSelect(filteredCards[0]);
-      } 
-      // If no cards match but search term exists
-      else if (searchTerm.trim() !== '') {
-        // Check if card exists in our database
+      } else if (searchTerm.trim() !== '') {
         const cardExists = creditCards.some(card => 
           card.fullName.toLowerCase() === searchTerm.toLowerCase().trim()
         );
         
         if (cardExists) {
-          // This card exists but we didn't find any offers
           setNoOffersMessage("No offers found for this card.");
         } else {
-          // Card doesn't exist in our database
           setNoOffersMessage("Card not found. Please try another name.");
         }
         
-        // Clear any previous selection
         setSelectedCard(null);
-        setSwiggyOffers([]);
-        setZomatoOffers([]);
+        setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
       }
     }
   };
 
-  // Auto-detect when no cards match the search
   useEffect(() => {
     if (searchTerm.trim() !== '' && 
         filteredCards.length === 0 && 
@@ -380,9 +367,81 @@ const fetchOffers = async (card) => {
     }
   }, [searchTerm, filteredCards, selectedCard]);
 
+  // Render offer cards based on platform
+  const renderOfferCards = () => {
+    return Object.entries(platformOffers).map(([platform, offers]) => {
+      if (offers.length === 0) return null;
+
+      return (
+        <div key={platform} className="platform-offers">
+          <h2 style={{ textAlign: 'center' }}>Offers on {platform}</h2>
+          <div className="offers-container">
+            {offers.map((offer, index) => (
+              <div key={index} className="offer-card">
+                {platform === "Eatsure" && (
+                  <>
+                    <p><strong>Description:</strong> {offer.description}</p>
+                    <p>
+                      <strong>Coupon Code:</strong> {offer.coupon}
+                      <button 
+                        onClick={() => copyToClipboard(offer.coupon)}
+                        className="copy-button"
+                      >
+                        📋
+                      </button>
+                    </p>
+                  </>
+                )}
+                
+                {platform === "Swiggy" && (
+                  <>
+                    <p><strong>Offer Title:</strong> {offer.title}</p>
+                    <p><strong>Description:</strong> {offer.description}</p>
+                    <p><strong>Terms:</strong> {offer.terms}</p>
+                    <p><strong>Coupon Code:</strong> {offer.coupon}</p>
+                    {offer.link && (
+                      <a 
+                        href={offer.link} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="offer-link"
+                      >
+                        View Offer
+                      </a>
+                    )}
+                  </>
+                )}
+                
+                {platform === "Zomato" && (
+                  <>
+                    <p><strong>Offer:</strong> {offer.offer}</p>
+                    <div className="terms-container">
+                      <strong>Terms & Conditions:</strong>
+                      <div className="scrollable-terms">
+                        {offer.terms}
+                      </div>
+                    </div>
+                    <p>
+                      <strong>Coupon Code:</strong> {offer.coupon}
+                      <button 
+                        onClick={() => copyToClipboard(offer.coupon)}
+                        className="copy-button"
+                      >
+                        📋
+                      </button>
+                    </p>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    });
+  };
+
   return (
     <div className="container">
-      {/* Search and dropdown section */}
       <div className="search-section" style={{ display: 'flex', justifyContent: 'center' }}>
         <div style={{ width: '100%', maxWidth: '600px' }}>
           <input
@@ -401,7 +460,6 @@ const fetchOffers = async (card) => {
                   className="dropdown-item"
                   onClick={() => handleCardSelect(card)}
                 >
-                  {/* Highlight matching parts */}
                   {highlightMatch(card.fullName, searchTerm)}
                 </li>
               ))}
@@ -410,7 +468,7 @@ const fetchOffers = async (card) => {
         </div>
       </div>
 
- {noOffersMessage && (
+      {noOffersMessage && (
         <p className="no-offers-message" style={{ 
           textAlign: 'center', 
           color: noOffersMessage.includes("not found") ? '#ff0000' : 'inherit',
@@ -423,38 +481,15 @@ const fetchOffers = async (card) => {
       {selectedCard && !noOffersMessage && (
         <div className="offers-section" style={{ display: 'flex', justifyContent: 'center' }}>
           <div style={{ width: '100%', maxWidth: '800px' }}>
-            {zomatoOffers.length > 0 && (
-              <div className="platform-offers">
-                <h2 style={{ textAlign: 'center' }}>Zomato Offers</h2>
-                <div className="offers-container">
-                  {zomatoOffers.map((offer, index) => (
-                    <div key={index} className="offer-card">
-                      <p><strong>Offer:</strong> {offer.offer}</p>
-                      <p><strong>Coupon Code:</strong> {offer.coupon}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {swiggyOffers.length > 0 && (
-              <div className="platform-offers">
-                <h2 style={{ textAlign: 'center' }}>Swiggy Offers</h2>
-                <div className="offers-container">
-                  {swiggyOffers.map((offer, index) => (
-                    <div key={index} className="offer-card">
-                      <p><strong>Offer:</strong> {offer.offer}</p>
-                      <p><strong>Coupon Code:</strong> {offer.coupon}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {renderOfferCards()}
           </div>
         </div>
       )}
+      
       {showScrollButton && (
         <button 
           onClick={handleScrollDown}
+          className="scroll-button"
           style={{
             position: 'fixed',
             right: '20px',
@@ -473,12 +508,13 @@ const fetchOffers = async (card) => {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
-            marginBottom:'300px'
+            marginBottom: '300px'
           }}
         >
           {isMobile ? '↓' : 'Scroll Down'}
         </button>
       )}
+      
       <div className="bottom-disclaimer">
         <h3>Disclaimer</h3>
         <p>
