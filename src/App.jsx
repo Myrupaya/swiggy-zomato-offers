@@ -512,20 +512,22 @@ const CreditCardDropdown = () => {
       </div>
 
       {noOffersMessage && (
-        <p className="no-offers-message" style={{ 
-          textAlign: 'center', 
-          color: noOffersMessage.includes("not found") ? '#FF0000' : 'inherit',
-          fontWeight: noOffersMessage.includes("not found") ? 'bold' : 'normal',
-          margin: '20px auto',
-          maxWidth: '600px'
-        }}>
-          {noOffersMessage}
-        </p>
-      )}
+  <p className="no-offers-message" style={{ 
+    textAlign: 'center', 
+    color: '#FF0000',  // Always red
+    fontWeight: 'bold',
+    margin: '20px auto',
+    maxWidth: '600px'
+  }}>
+    {noOffersMessage}
+  </p>
+)}
+
+    
 
       {selectedCard && !noOffersMessage && (
-        <div className="offers-section" style={{ display: 'flex', justifyContent: 'center' }}>
-          <div style={{ width: '100%', maxWidth: '800px' }}>
+        <div className="offers-section" style={{ display: 'flex', justifyContent: 'center', color:'#FF0000' }}>
+          <div style={{ width: '100%', maxWidth: '800px', color:'#FF0000' }}>
             {renderOfferCards()}
           </div>
         </div>
