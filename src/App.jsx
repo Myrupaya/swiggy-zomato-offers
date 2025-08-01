@@ -258,72 +258,84 @@ const CreditCardDropdown = () => {
   }, []);
 
   // Enhanced offer fetching with better matching
-  const fetchOffers = async (group) => {
-    const fetchAndParseCSV = (filePath) =>
-      new Promise((resolve, reject) => {
-        Papa.parse(filePath, {
-          download: true,
-          header: true,
-          complete: (results) => resolve(results.data),
-          error: (error) => reject(error),
-        });
+const fetchOffers = async (group) => {
+  const fetchAndParseCSV = (filePath) =>
+    new Promise((resolve, reject) => {
+      Papa.parse(filePath, {
+        download: true,
+        header: true,
+        complete: (results) => resolve(results.data),
+        error: (error) => reject(error),
       });
+    });
 
-    const filterOffers = (data, variant, platform) => {
-      return data
-        .filter((row) => {
-          if (!row["Applicable to Credit cards"]) return false;
+  const filterOffers = (data, variant, platform) => {
+    return data
+      .filter((row) => {
+        if (!row["Applicable to Credit cards"]) return false;
+        
+        const rowCards = row["Applicable to Credit cards"]
+          .split(",")
+          .map(c => c.trim());
           
-          const rowCards = row["Applicable to Credit cards"]
-            .split(",")
-            .map(c => normalizeCardName(c.trim()));
-            
-          // Enhanced matching: Check both full name and base name
-          return rowCards.some(rowCard => {
-            // 1. Match by full name
-            if (rowCard === variant.fullName) return true;
-            
-            // 2. Match by base name
-            if (getBaseCardName(rowCard) === variant.baseName) {
-              return true;
-            }
-            
-            // 3. Match by similar name (fuzzy match for typos)
-            const distance = levenshteinDistance(rowCard, variant.fullName);
-            const maxLen = Math.max(rowCard.length, variant.fullName.length);
-            if (distance <= 2 && (distance / maxLen) < 0.3) {
-              return true;
-            }
-            
-            return false;
-          });
-        })
-        .map((row) => {
-          const offer = {};
-          switch(platform) {
-            case "Eatsure":
-              offer.description = row["Description"];
-              offer.coupon = row["Coupon Code"];
-              break;
-            case "Swiggy":
-              offer.title = row["Offer Title"];
-              offer.description = row["Offer Description"];
-              offer.terms = row["Terms and Conditions"];
-              offer.coupon = row["Offer Code"];
-              offer.link = row["Link to Apply Coupon"];
-              break;
-            case "Zomato":
-              offer.offer = row["Offer"];
-              offer.terms = row["Terms and Conditions"];
-              offer.coupon = row["Coupon Code"];
-              break;
+        return rowCards.some(rowCard => {
+          const normalizedRowCard = normalizeCardName(rowCard);
+          const baseRowCard = getBaseCardName(normalizedRowCard);
+          
+          // Match by full name
+          if (normalizedRowCard === variant.fullName) return true;
+          
+          // Match by base name
+          if (baseRowCard === variant.baseName) {
+            return true;
           }
           
-          // Add variant information to offer
-          offer.variant = variant.network;
-          return offer;
+          return false;
         });
-    };
+      })
+       .map((row) => {
+        const offer = {};
+        switch(platform) {
+          case "Eatsure":
+            offer.description = row["Description"];
+            offer.coupon = row["Coupon Code"];
+            break;
+          case "Swiggy":
+            offer.title = row["Offer Title"];
+            offer.description = row["Offer Description"];
+            offer.terms = row["Terms and Conditions"];
+            offer.coupon = row["Offer Code"];
+            offer.link = row["Link to Apply Coupon"];
+            break;
+          case "Zomato":
+            offer.offer = row["Offer"];
+            offer.terms = row["Terms and Conditions"];
+            offer.coupon = row["Coupon Code"];
+            break;
+        }
+        const matchedCard = row["Applicable to Credit cards"]
+          .split(",")
+          .find(c => {
+            const normalized = normalizeCardName(c.trim());
+            return normalized === variant.fullName || 
+                   getBaseCardName(normalized) === variant.baseName;
+          });
+        
+        if (matchedCard) {
+          const variantMatch = matchedCard.match(/\(([^)]+)\)$/);
+          if (variantMatch) {
+            // Preserve the original variant name from CSV
+            offer.variant = variantMatch[1].trim();
+          }
+        }
+        
+        return offer;
+      });
+  };    
+
+          
+   
+    
 
     try {
       const [swiggyData, zomatoData, eatsureData] = await Promise.all([
