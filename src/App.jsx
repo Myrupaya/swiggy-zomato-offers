@@ -264,6 +264,7 @@ const fetchOffers = async (group) => {
       Papa.parse(filePath, {
         download: true,
         header: true,
+        skipEmptyLines: true, // Add this to skip empty lines
         complete: (results) => resolve(results.data),
         error: (error) => reject(error),
       });
@@ -272,6 +273,17 @@ const fetchOffers = async (group) => {
   const filterOffers = (data, variant, platform) => {
     return data
       .filter((row) => {
+        // Skip rows with empty offer details
+        if (platform === "Zomato" && (!row["Offer"] || !row["Coupon Code"])) {
+          return false;
+        }
+        if (platform === "Swiggy" && (!row["Offer Title"] || !row["Offer Code"])) {
+          return false;
+        }
+        if (platform === "Eatsure" && (!row["Description"] || !row["Coupon Code"])) {
+          return false;
+        }
+        
         if (!row["Applicable to Credit cards"]) return false;
         
         const rowCards = row["Applicable to Credit cards"]
@@ -279,6 +291,8 @@ const fetchOffers = async (group) => {
           .map(c => c.trim());
           
         return rowCards.some(rowCard => {
+          if (!rowCard) return false;
+          
           const normalizedRowCard = normalizeCardName(rowCard);
           const baseRowCard = getBaseCardName(normalizedRowCard);
           
@@ -293,7 +307,7 @@ const fetchOffers = async (group) => {
           return false;
         });
       })
-       .map((row) => {
+      .map((row) => {
         const offer = {};
         switch(platform) {
           case "Eatsure":
