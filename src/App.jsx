@@ -2,15 +2,21 @@ import React, { useState, useEffect } from "react";
 import Papa from "papaparse";
 import "./App.css";
 
-// Enhanced normalization function
+// Enhanced normalization function with special handling for J&K Bank
 const normalizeCardName = (name) => {
   if (!name) return '';
+  
   return name.trim()
     .toLowerCase()
-    .replace(/\b\w/g, c => c.toUpperCase())
-    .replace(/\s+/g, ' ')
-    .replace(/&/g, '&') // Preserve ampersand
-    .replace(/J\s*&\s*K/g, 'J&K'); // Special handling for J&K Bank
+    .replace(/\s+and\s+/g, '&')       // Convert "and" to "&"
+    .replace(/\s*&\s*/g, '&')         // Remove spaces around ampersand
+    .replace(/j\s*&\s*k/g, 'j&k')     // Special handling for J&K
+    .replace(/\s+/g, ' ')             // Collapse multiple spaces
+    .replace(/\b\w/g, c => c.toUpperCase()) // Capitalize first letter of each word
+    .replace(/\s*-\s*/g, '-')         // Handle hyphens
+    .replace(/\s*\.\s*/g, '.')        // Handle dots
+    .replace(/\s*\(\s*/g, '(')        // Remove spaces before parenthesis
+    .replace(/\s*\)\s*/g, ')');       // Remove spaces after parenthesis
 };
 
 // Helper to extract base card name
@@ -28,7 +34,6 @@ const getNetworkVariant = (name) => {
 
 // Fuzzy matching utility functions
 const levenshteinDistance = (a, b) => {
-  if (!a || !b) return 100;
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
   
@@ -55,25 +60,38 @@ const levenshteinDistance = (a, b) => {
 
 const getMatchScore = (query, card) => {
   if (!query || !card) return 0;
-
-  const q = query.toLowerCase();
-  const c = card.toLowerCase();
-
+  
+  const q = query.trim().toLowerCase();
+  const c = card.trim().toLowerCase();
+  
   if (c === q) return 100;
   if (c.includes(q)) return 90;
-
+  
   const qWords = q.split(/\s+/);
   const cWords = c.split(/\s+/);
-
-  const matchingWords = qWords.filter(qWord =>
+  
+  const wordMatches = qWords.filter(qWord => 
     cWords.some(cWord => cWord.includes(qWord))
   ).length;
-
-  const similarity = 1 - (levenshteinDistance(q, c) / Math.max(q.length, c.length));
-
-  return (matchingWords / qWords.length) * 0.7 + similarity * 0.3;
+  
+  const fuzzyWordMatches = qWords.filter(qWord => 
+    cWords.some(cWord => {
+      const distance = levenshteinDistance(qWord, cWord);
+      const maxLen = Math.max(qWord.length, cWord.length);
+      return distance <= 2 && (distance / maxLen) < 0.35;
+    })
+  ).length;
+  
+  const distance = levenshteinDistance(q, c);
+  const maxLen = Math.max(q.length, c.length);
+  const similarity = 1 - (distance / maxLen);
+  
+  return (
+    (wordMatches / qWords.length) * 0.5 +
+    (fuzzyWordMatches / qWords.length) * 0.3 +
+    similarity * 0.2
+  ) * 100;
 };
-
 
 const highlightMatch = (text, query) => {
   if (!query.trim()) return text;
@@ -87,14 +105,10 @@ const highlightMatch = (text, query) => {
 };
 
 const CreditCardDropdown = () => {
-  const [creditCards, setCreditCards] = useState([]);
-  const [swiggyOffers, setSwiggyOffers] = useState([]);
-  const [zomatoOffers, setZomatoOffers] = useState([]);
-  const [eatsureOffers, setEatsureOffers] = useState([]);
-  const [allCards, setAllCards] = useState([]);
-  const [filteredCards, setFilteredCards] = useState([]);
+  const [groupedCards, setGroupedCards] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCard, setSelectedCard] = useState("");
+  const [filteredCards, setFilteredCards] = useState([]);
+  const [selectedGroup, setSelectedGroup] = useState(null);
   const [platformOffers, setPlatformOffers] = useState({
     Eatsure: [],
     Swiggy: [],
@@ -103,8 +117,7 @@ const CreditCardDropdown = () => {
   const [noOffersMessage, setNoOffersMessage] = useState("");
   const [isMobile, setIsMobile] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
-  const [typingTimeout, setTypingTimeout] = useState(null);
-  const [showNoMatchMessage, setShowNoMatchMessage] = useState(false);
+  const [cardsLoaded, setCardsLoaded] = useState(false);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -150,6 +163,45 @@ const CreditCardDropdown = () => {
         });
       });
 
+    const extractCreditCards = (data, platform) => {
+      const cards = [];
+      data.forEach((row) => {
+        const applicableCards = row["Applicable to Credit cards"];
+        if (applicableCards) {
+          const cardNames = applicableCards
+            .split(",")
+            .map((card) => {
+              const normalized = normalizeCardName(card);
+              return {
+                fullName: normalized,
+                baseName: getBaseCardName(normalized),
+                network: getNetworkVariant(normalized),
+                source: platform // Track where card came from
+              };
+            });
+          cards.push(...cardNames);
+        }
+      });
+      return cards;
+    };
+
+    const extractAllCards = (data) => {
+      const cards = [];
+      data.forEach((row) => {
+        const cardName = row["Applicable to Credit cards"];
+        if (cardName) {
+          const normalized = normalizeCardName(cardName);
+          cards.push({
+            fullName: normalized,
+            baseName: getBaseCardName(normalized),
+            network: getNetworkVariant(normalized),
+            source: "All Cards"
+          });
+        }
+      });
+      return cards;
+    };
+
     const fetchData = async () => {
       try {
         const [swiggyData, zomatoData, eatsureData, allCardsData] = await Promise.all([
@@ -159,187 +211,229 @@ const CreditCardDropdown = () => {
           fetchAndParseCSV("/All Cards.csv")
         ]);
 
-        // Set offers data
-        setSwiggyOffers(swiggyData);
-        setZomatoOffers(zomatoData);
-        setEatsureOffers(eatsureData);
-        setAllCards(allCardsData);
+        // Extract cards with source information
+        const swiggyCards = extractCreditCards(swiggyData, "Swiggy");
+        const zomatoCards = extractCreditCards(zomatoData, "Zomato");
+        const eatsureCards = extractCreditCards(eatsureData, "Eatsure");
+        const allCardsList = extractAllCards(allCardsData);
 
-        // Extract unique card names from all sources
-        const cardSet = new Set();
+        // Combine all cards, prioritizing offers CSVs
+        const allCardsCombined = [
+          ...swiggyCards, 
+          ...zomatoCards, 
+          ...eatsureCards,
+          ...allCardsList
+        ];
         
-        // Extract from Swiggy
-        swiggyData.forEach(row => {
-          if (row["Applicable to Credit cards"]) {
-            row["Applicable to Credit cards"].split(",").forEach(card => {
-              const normalized = getBaseCardName(normalizeCardName(card.trim()));
-              cardSet.add(normalized);
-            });
+        // Group cards by base name and ensure variants are unique
+        const grouped = {};
+        allCardsCombined.forEach(card => {
+          const base = card.baseName;
+          if (!grouped[base]) {
+            grouped[base] = {
+              baseName: base,
+              variants: []
+            };
           }
-        });
-        
-        // Extract from Zomato
-        zomatoData.forEach(row => {
-          if (row["Applicable to Credit cards"]) {
-            row["Applicable to Credit cards"].split(",").forEach(card => {
-              const normalized = getBaseCardName(normalizeCardName(card.trim()));
-              cardSet.add(normalized);
-            });
-          }
-        });
-        
-        // Extract from Eatsure
-        eatsureData.forEach(row => {
-          if (row["Applicable to Credit cards"]) {
-            row["Applicable to Credit cards"].split(",").forEach(card => {
-              const normalized = getBaseCardName(normalizeCardName(card.trim()));
-              cardSet.add(normalized);
-            });
-          }
-        });
-        
-        // Extract from All Cards
-        allCardsData.forEach(row => {
-          if (row["Applicable to Credit cards"]) {
-            const normalized = getBaseCardName(normalizeCardName(row["Applicable to Credit cards"].trim()));
-            cardSet.add(normalized);
+          
+          // Check if variant already exists before adding
+          const exists = grouped[base].variants.some(
+            v => v.fullName === card.fullName
+          );
+          
+          if (!exists) {
+            grouped[base].variants.push(card);
           }
         });
 
-        // Convert set to sorted array
-        const uniqueCards = Array.from(cardSet).sort((a, b) => 
-          a.toLowerCase().localeCompare(b.toLowerCase())
-        );
-        
-        setCreditCards(uniqueCards);
+        setGroupedCards(grouped);
+        setCardsLoaded(true); 
       } catch (error) {
         console.error("Error fetching or parsing CSV files:", error);
+        setCardsLoaded(true);
       }
     };
 
     fetchData();
   }, []);
 
+  // Enhanced offer fetching with better matching
+  const fetchOffers = async (group) => {
+    const fetchAndParseCSV = (filePath) =>
+      new Promise((resolve, reject) => {
+        Papa.parse(filePath, {
+          download: true,
+          header: true,
+          complete: (results) => resolve(results.data),
+          error: (error) => reject(error),
+        });
+      });
+
+    const filterOffers = (data, variant, platform) => {
+      return data
+        .filter((row) => {
+          if (!row["Applicable to Credit cards"]) return false;
+          
+          const rowCards = row["Applicable to Credit cards"]
+            .split(",")
+            .map(c => normalizeCardName(c.trim()));
+            
+          // Enhanced matching: Check both full name and base name
+          return rowCards.some(rowCard => {
+            // 1. Match by full name
+            if (rowCard === variant.fullName) return true;
+            
+            // 2. Match by base name
+            if (getBaseCardName(rowCard) === variant.baseName) {
+              return true;
+            }
+            
+            // 3. Match by similar name (fuzzy match for typos)
+            const distance = levenshteinDistance(rowCard, variant.fullName);
+            const maxLen = Math.max(rowCard.length, variant.fullName.length);
+            if (distance <= 2 && (distance / maxLen) < 0.3) {
+              return true;
+            }
+            
+            return false;
+          });
+        })
+        .map((row) => {
+          const offer = {};
+          switch(platform) {
+            case "Eatsure":
+              offer.description = row["Description"];
+              offer.coupon = row["Coupon Code"];
+              break;
+            case "Swiggy":
+              offer.title = row["Offer Title"];
+              offer.description = row["Offer Description"];
+              offer.terms = row["Terms and Conditions"];
+              offer.coupon = row["Offer Code"];
+              offer.link = row["Link to Apply Coupon"];
+              break;
+            case "Zomato":
+              offer.offer = row["Offer"];
+              offer.terms = row["Terms and Conditions"];
+              offer.coupon = row["Coupon Code"];
+              break;
+          }
+          
+          // Add variant information to offer
+          offer.variant = variant.network;
+          return offer;
+        });
+    };
+
+    try {
+      const [swiggyData, zomatoData, eatsureData] = await Promise.all([
+        fetchAndParseCSV("/Swiggy.csv"),
+        fetchAndParseCSV("/Zomato.csv"),
+        fetchAndParseCSV("/Eatsure.csv")
+      ]);
+
+      // Collect offers from all variants in the group
+      const eatsureOffers = [];
+      const swiggyOffers = [];
+      const zomatoOffers = [];
+      
+      for (const variant of group.variants) {
+        // Only include offers from their source platforms
+        if (variant.source === "Eatsure" || variant.source === "All Cards") {
+          eatsureOffers.push(...filterOffers(eatsureData, variant, "Eatsure"));
+        }
+        if (variant.source === "Swiggy" || variant.source === "All Cards") {
+          swiggyOffers.push(...filterOffers(swiggyData, variant, "Swiggy"));
+        }
+        if (variant.source === "Zomato" || variant.source === "All Cards") {
+          zomatoOffers.push(...filterOffers(zomatoData, variant, "Zomato"));
+        }
+      }
+
+      // Remove duplicate offers
+      const uniqueOffers = (offers) => {
+        const seen = new Set();
+        return offers.filter(offer => {
+          const key = `${offer.description || offer.title || offer.offer}-${offer.coupon}`;
+          if (seen.has(key)) {
+            return false;
+          }
+          seen.add(key);
+          return true;
+        });
+      };
+
+      setPlatformOffers({
+        Eatsure: uniqueOffers(eatsureOffers),
+        Swiggy: uniqueOffers(swiggyOffers),
+        Zomato: uniqueOffers(zomatoOffers)
+      });
+
+      // Show message only if no offers found across all platforms
+      if (eatsureOffers.length === 0 && 
+          swiggyOffers.length === 0 && 
+          zomatoOffers.length === 0) {
+        setNoOffersMessage("No offers found for this card.");
+      } else {
+        setNoOffersMessage("");
+      }
+    } catch (error) {
+      console.error("Error fetching or filtering offers:", error);
+      setNoOffersMessage("Error fetching offers. Please try again.");
+    }
+  };
+
+  // Enhanced card existence check
+  const cardExists = (cardName) => {
+    const normalized = normalizeCardName(cardName);
+    const baseName = getBaseCardName(normalized);
+    
+    // Check if any card matches by base name or full name
+    return Object.values(groupedCards).some(group => 
+      group.baseName === baseName ||
+      group.variants.some(v => v.fullName === normalized)
+    );
+  };
+
   // Handle search input
   const handleSearchChange = (e) => {
     const value = e.target.value;
     setSearchTerm(value);
     
-    setSelectedCard("");
+    setSelectedGroup(null);
     setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
     setNoOffersMessage("");
-    setShowNoMatchMessage(false);
 
-    if (typingTimeout) clearTimeout(typingTimeout);
-
-    if (!value) {
+    if (value === "") {
       setFilteredCards([]);
       return;
     }
 
-    // Fuzzy matching for credit cards
-    const results = creditCards
-      .map(card => ({
-        card,
-        score: getMatchScore(value, card)
+    const matchingGroups = Object.values(groupedCards)
+      .map(group => ({
+        ...group,
+        score: getMatchScore(value, group.baseName)
       }))
-      .filter(item => item.score > 30)
+      .filter(group => group.score > 40)
       .sort((a, b) => b.score - a.score)
       .slice(0, 10);
 
-    setFilteredCards(results.map(item => item.card));
-
-    // Show "no matches" message if no results after 1 second
-    if (results.length === 0 && value.length > 2) {
-      const timeout = setTimeout(() => {
-        setShowNoMatchMessage(true);
-      }, 1000);
-      setTypingTimeout(timeout);
-    }
-  };
-
-  // Get offers for selected card
-  const getOffersForSelectedCard = (offers, platform) => {
-    if (!selectedCard) return [];
+    setFilteredCards(matchingGroups);
     
-    return offers.filter((row) => {
-      if (!row["Applicable to Credit cards"]) return false;
-      
-      const rowCards = row["Applicable to Credit cards"]
-        .split(",")
-        .map(c => getBaseCardName(normalizeCardName(c.trim())));
-      
-      return rowCards.some(baseCard => 
-        baseCard.toLowerCase() === selectedCard.toLowerCase()
-      );
-    }).map((row) => {
-      const offer = {};
-      switch(platform) {
-        case "Eatsure":
-          offer.description = row["Description"];
-          offer.coupon = row["Coupon Code"];
-          break;
-        case "Swiggy":
-          offer.title = row["Offer Title"];
-          offer.description = row["Offer Description"];
-          offer.terms = row["Terms and Conditions"];
-          offer.coupon = row["Offer Code"];
-          offer.link = row["Link to Apply Coupon"];
-          break;
-        case "Zomato":
-          offer.offer = row["Offer"];
-          offer.terms = row["Terms and Conditions"];
-          offer.coupon = row["Coupon Code"];
-          break;
-      }
-      
-      // Add variant information if available
-      if (row["Applicable to Credit cards"]) {
-        const cardName = row["Applicable to Credit cards"].split(",")[0];
-        const variant = getNetworkVariant(cardName);
-        if (variant) {
-          offer.variant = variant;
-        }
-      }
-      
-      return offer;
-    });
+    // Show error if no matches found and card doesn't exist
+    if (matchingGroups.length === 0 && !cardExists(value)) {
+      setNoOffersMessage("Card not found in our database. Please try another name.");
+    }
   };
 
   // Handle card selection
-  const handleCardSelect = (card) => {
-    setSelectedCard(card);
-    setSearchTerm(card);
+  const handleCardSelect = (group) => {
+    setSelectedGroup(group);
+    setSearchTerm(group.baseName);
     setFilteredCards([]);
-    setShowNoMatchMessage(false);
-    if (typingTimeout) clearTimeout(typingTimeout);
-
-    // Get offers from all platforms
-    const eatsureOffers = getOffersForSelectedCard(eatsureOffers, "Eatsure");
-    const swiggyOffers = getOffersForSelectedCard(swiggyOffers, "Swiggy");
-    const zomatoOffers = getOffersForSelectedCard(zomatoOffers, "Zomato");
-
-    setPlatformOffers({
-      Eatsure: eatsureOffers,
-      Swiggy: swiggyOffers,
-      Zomato: zomatoOffers
-    });
-
-    // Check if card exists in All Cards.csv
-    const cardExists = allCards.some(row => 
-      row["Applicable to Credit cards"] && 
-      getBaseCardName(normalizeCardName(row["Applicable to Credit cards"].trim())) === card
-    );
-
-    // Show "no offers" message only if card exists but has no offers
-    if (cardExists && 
-        eatsureOffers.length === 0 && 
-        swiggyOffers.length === 0 && 
-        zomatoOffers.length === 0) {
-      setNoOffersMessage("No offers found for this card.");
-    } else {
-      setNoOffersMessage("");
-    }
+    setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
+    setNoOffersMessage("");
+    fetchOffers(group);
   };
 
   // Handle Enter key press
@@ -348,19 +442,24 @@ const CreditCardDropdown = () => {
       e.preventDefault();
       setNoOffersMessage("");
       setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
-      setShowNoMatchMessage(false);
 
       if (filteredCards.length > 0) {
         handleCardSelect(filteredCards[0]);
       } else if (searchTerm.trim() !== '') {
-        // Check if search term matches any card
-        const normalizedSearch = getBaseCardName(normalizeCardName(searchTerm.trim()));
-        const exists = creditCards.some(card => 
-          card.toLowerCase() === normalizedSearch.toLowerCase()
-        );
+        if (!cardExists(searchTerm)) {
+          setSelectedGroup(null);
+          setNoOffersMessage("Card not found in our database. Please try another name.");
+          return;
+        }
         
-        if (exists) {
-          handleCardSelect(normalizedSearch);
+        // Find the group for this card
+        const normalizedInput = normalizeCardName(searchTerm.trim());
+        const baseInput = getBaseCardName(normalizedInput);
+        const group = groupedCards[baseInput];
+        
+        if (group) {
+          setSelectedGroup(group);
+          fetchOffers(group);
         } else {
           setNoOffersMessage("Card not found in our database. Please try another name.");
         }
@@ -473,19 +572,16 @@ const CreditCardDropdown = () => {
             onKeyDown={handleKeyDown}
             placeholder="Search your credit card..."
             className="search-input"
-            style={{
-              border: showNoMatchMessage ? '1px solid red' : '1px solid #ccc'
-            }}
           />
           {filteredCards.length > 0 && (
             <ul className="dropdown-list">
-              {filteredCards.map((card, index) => (
+              {filteredCards.map((group, index) => (
                 <li
                   key={index}
                   className="dropdown-item"
-                  onClick={() => handleCardSelect(card)}
+                  onClick={() => handleCardSelect(group)}
                 >
-                  {highlightMatch(card, searchTerm)}
+                  {highlightMatch(group.baseName, searchTerm)}
                 </li>
               ))}
             </ul>
@@ -493,31 +589,19 @@ const CreditCardDropdown = () => {
         </div>
       </div>
 
-      {showNoMatchMessage && (
-        <p className="no-match-message" style={{ 
-          textAlign: 'center', 
-          color: '#FF0000',
-          fontWeight: 'bold',
-          margin: '10px auto',
-          maxWidth: '600px'
-        }}>
-          No matching cards found. Please try a different name.
-        </p>
-      )}
-
       {noOffersMessage && (
         <p className="no-offers-message" style={{ 
           textAlign: 'center', 
-          color: '#1e7145',
+          color: noOffersMessage.includes("not found") ? '#FF0000' : '#1e7145',
           fontWeight: 'bold',
-          margin: '10px auto',
+          margin: '20px auto',
           maxWidth: '600px'
         }}>
           {noOffersMessage}
         </p>
       )}
 
-      {selectedCard && !noOffersMessage && (
+      {selectedGroup && !noOffersMessage && (
         <div className="offers-section" style={{ display: 'flex', justifyContent: 'center' }}>
           <div style={{ width: '100%', maxWidth: '800px' }}>
             {renderOfferCards()}
