@@ -19,7 +19,8 @@ body {
 
         @media (max-width: 768px) {
   .bottom-disclaimer {
-    font-size: 14px; /* Adjust as needed */
+    font-size: 12px; /* Adjust as needed */
+    
   }
 }
 
