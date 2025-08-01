@@ -258,98 +258,111 @@ const CreditCardDropdown = () => {
   }, []);
 
   // Enhanced offer fetching with better matching
-const fetchOffers = async (group) => {
-  const fetchAndParseCSV = (filePath) =>
-    new Promise((resolve, reject) => {
-      Papa.parse(filePath, {
-        download: true,
-        header: true,
-        skipEmptyLines: true, // Add this to skip empty lines
-        complete: (results) => resolve(results.data),
-        error: (error) => reject(error),
-      });
-    });
-
-  const filterOffers = (data, variant, platform) => {
-    return data
-      .filter((row) => {
-        // Skip rows with empty offer details
-        if (platform === "Zomato" && (!row["Offer"] || !row["Coupon Code"])) {
-          return false;
-        }
-        if (platform === "Swiggy" && (!row["Offer Title"] || !row["Offer Code"])) {
-          return false;
-        }
-        if (platform === "Eatsure" && (!row["Description"] || !row["Coupon Code"])) {
-          return false;
-        }
-        
-        if (!row["Applicable to Credit cards"]) return false;
-        
-        const rowCards = row["Applicable to Credit cards"]
-          .split(",")
-          .map(c => c.trim());
-          
-        return rowCards.some(rowCard => {
-          if (!rowCard) return false;
-          
-          const normalizedRowCard = normalizeCardName(rowCard);
-          const baseRowCard = getBaseCardName(normalizedRowCard);
-          
-          // Match by full name
-          if (normalizedRowCard === variant.fullName) return true;
-          
-          // Match by base name
-          if (baseRowCard === variant.baseName) {
-            return true;
-          }
-          
-          return false;
+  const fetchOffers = async (group) => {
+    const fetchAndParseCSV = (filePath) =>
+      new Promise((resolve, reject) => {
+        Papa.parse(filePath, {
+          download: true,
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => resolve(results.data),
+          error: (error) => reject(error),
         });
-      })
-      .map((row) => {
-        const offer = {};
-        switch(platform) {
-          case "Eatsure":
-            offer.description = row["Description"];
-            offer.coupon = row["Coupon Code"];
-            break;
-          case "Swiggy":
-            offer.title = row["Offer Title"];
-            offer.description = row["Offer Description"];
-            offer.terms = row["Terms and Conditions"];
-            offer.coupon = row["Offer Code"];
-            offer.link = row["Link to Apply Coupon"];
-            break;
-          case "Zomato":
-            offer.offer = row["Offer"];
-            offer.terms = row["Terms and Conditions"];
-            offer.coupon = row["Coupon Code"];
-            break;
-        }
-        const matchedCard = row["Applicable to Credit cards"]
-          .split(",")
-          .find(c => {
-            const normalized = normalizeCardName(c.trim());
-            return normalized === variant.fullName || 
-                   getBaseCardName(normalized) === variant.baseName;
-          });
-        
-        if (matchedCard) {
-          const variantMatch = matchedCard.match(/\(([^)]+)\)$/);
-          if (variantMatch) {
-            // Preserve the original variant name from CSV
-            offer.variant = variantMatch[1].trim();
-          }
-        }
-        
-        return offer;
       });
-  };    
 
+    const filterOffers = (data, variant, platform) => {
+      return data
+        .filter((row) => {
+          // Skip rows with empty offer details
+          if (platform === "Zomato" && (!row["Offer"] || !row["Coupon Code"])) {
+            return false;
+          }
+          if (platform === "Swiggy" && (!row["Offer Title"] || !row["Offer Code"])) {
+            return false;
+          }
+          if (platform === "Eatsure" && (!row["Description"] || !row["Coupon Code"])) {
+            return false;
+          }
           
-   
-    
+          if (!row["Applicable to Credit cards"]) return false;
+          
+          const rowCards = row["Applicable to Credit cards"]
+            .split(",")
+            .map(c => c.trim());
+            
+          return rowCards.some(rowCard => {
+            if (!rowCard) return false;
+            
+            const normalizedRowCard = normalizeCardName(rowCard);
+            const baseRowCard = getBaseCardName(normalizedRowCard);
+            
+            // NEW: Improved matching logic for base cards and variants
+            if (variant.network) {
+              // Specific variant: match by full name or base name
+              if (normalizedRowCard === variant.fullName || baseRowCard === variant.baseName) {
+                return true;
+              }
+            } else {
+              // Base variant: only match by full name
+              if (normalizedRowCard === variant.fullName) {
+                return true;
+              }
+            }
+            return false;
+          });
+        })
+        .map((row) => {
+          const offer = {};
+          switch(platform) {
+            case "Eatsure":
+              offer.description = row["Description"];
+              offer.coupon = row["Coupon Code"];
+              break;
+            case "Swiggy":
+              offer.title = row["Offer Title"];
+              offer.description = row["Offer Description"];
+              offer.terms = row["Terms and Conditions"];
+              offer.coupon = row["Offer Code"];
+              offer.link = row["Link to Apply Coupon"];
+              break;
+            case "Zomato":
+              offer.offer = row["Offer"];
+              offer.terms = row["Terms and Conditions"];
+              offer.coupon = row["Coupon Code"];
+              break;
+          }
+          
+          // NEW: Improved variant detection
+          const matchedCard = row["Applicable to Credit cards"]
+            .split(",")
+            .find(c => {
+              const normalized = normalizeCardName(c.trim());
+              const base = getBaseCardName(normalized);
+              const network = getNetworkVariant(normalized);
+              
+              if (variant.network) {
+                // For variant cards
+                return (
+                  normalized === variant.fullName || 
+                  base === variant.baseName
+                );
+              } else {
+                // For base cards
+                return normalized === variant.fullName;
+              }
+            });
+          
+          if (matchedCard) {
+            const variantMatch = getNetworkVariant(normalizeCardName(matchedCard));
+            if (variantMatch) {
+              // Preserve the original variant name from CSV
+              offer.variant = variantMatch;
+            }
+          }
+          
+          return offer;
+        });
+    };    
 
     try {
       const [swiggyData, zomatoData, eatsureData] = await Promise.all([
