@@ -328,8 +328,8 @@ const AirlineOffers = () => {
     async function loadOffers() {
       try {
         const files = [
-          { name: "swiggy.csv", setter: setSwiggyOffers },
-          { name: "zomato.csv", setter: setZomatoOffers },
+          { name: "Swiggy.csv", setter: setSwiggyOffers },
+          { name: "Zomato.csv", setter: setZomatoOffers },
         ];
 
         await Promise.all(
