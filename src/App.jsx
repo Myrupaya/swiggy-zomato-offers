@@ -1,693 +1,841 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
+import axios from "axios";
 import Papa from "papaparse";
 import "./App.css";
 
-// Enhanced normalization function with special handling for J&K Bank
-const normalizeCardName = (name) => {
-  if (!name) return '';
-  
-  return name.trim()
+/** -------------------- CONFIG -------------------- */
+const LIST_FIELDS = {
+  credit: ["Eligible Credit Cards", "Eligible Cards"],
+  debit: ["Eligible Debit Cards", "Applicable Debit Cards"],
+  title: ["Offer Title", "Title"],
+  image: ["Image", "Credit Card Image", "Offer Image", "image", "Image URL"],
+  link: ["Link", "Offer Link"],
+  desc: ["Description", "Details", "Offer Description", "Flight Benefit"],
+};
+
+const MAX_SUGGESTIONS = 50;
+
+/** Sites that should display the red per-card “Applicable only on {variant} variant” note */
+const VARIANT_NOTE_SITES = new Set(["Swiggy", "Zomato"]);
+
+/** -------------------- HELPERS -------------------- */
+const toNorm = (s) =>
+  String(s || "")
     .toLowerCase()
-    .replace(/\s+and\s+/g, '&')       // Convert "and" to "&"
-    .replace(/\s*&\s*/g, '&')         // Remove spaces around ampersand
-    .replace(/j\s*&\s*k/g, 'j&k')     // Special handling for J&K
-    .replace(/\s+/g, ' ')             // Collapse multiple spaces
-    .replace(/\b\w/g, c => c.toUpperCase()) // Capitalize first letter of each word
-    .replace(/\s*-\s*/g, '-')         // Handle hyphens
-    .replace(/\s*\.\s*/g, '.')        // Handle dots
-    .replace(/\s*\(\s*/g, '(')        // Remove spaces before parenthesis
-    .replace(/\s*\)\s*/g, ')');       // Remove spaces after parenthesis
-};
+    .normalize("NFKD")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-// Helper to extract base card name
-const getBaseCardName = (name) => {
-  if (!name) return '';
-  return name.replace(/\s*\([^)]*\)$/, '').trim();
-};
-
-// Helper to extract network variant
-const getNetworkVariant = (name) => {
-  if (!name) return '';
-  const match = name.match(/\(([^)]+)\)$/);
-  return match ? match[1] : '';
-};
-
-// Fuzzy matching utility functions
-const levenshteinDistance = (a, b) => {
-  if (a.length === 0) return b.length;
-  if (b.length === 0) return a.length;
-  
-  const matrix = [];
-  for (let i = 0; i <= b.length; i++) {
-    matrix[i] = [i];
+function firstField(obj, keys) {
+  for (const k of keys) {
+    if (
+      obj &&
+      Object.prototype.hasOwnProperty.call(obj, k) &&
+      obj[k] !== undefined &&
+      obj[k] !== null &&
+      String(obj[k]).trim() !== ""
+    ) {
+      return obj[k];
+    }
   }
-  for (let j = 0; j <= a.length; j++) {
-    matrix[0][j] = j;
-  }
+  return undefined;
+}
 
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      const cost = b.charAt(i - 1) === a.charAt(j - 1) ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
+/** case-insensitive find for keys that CONTAIN a substring */
+function firstFieldByContains(obj, substr) {
+  if (!obj) return undefined;
+  const target = String(substr).toLowerCase();
+  for (const k of Object.keys(obj)) {
+    if (String(k).toLowerCase().includes(target)) {
+      const v = obj[k];
+      if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+    }
+  }
+  return undefined;
+}
+
+/** return all entries where predicate(key) is true */
+function entriesWhereKey(obj, predicate) {
+  if (!obj) return [];
+  const out = [];
+  for (const k of Object.keys(obj)) {
+    if (predicate(String(k))) {
+      const v = obj[k];
+      if (v !== undefined && v !== null && String(v).trim() !== "") {
+        out.push({ key: k, value: v });
+      }
+    }
+  }
+  return out;
+}
+
+/** split across many separators */
+function splitList(val) {
+  if (!val) return [];
+  return String(val)
+    .split(/,|\/|;|\||\n|\r|\t|\band\b|\bAND\b|•/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Strip trailing parentheses: "HDFC Regalia (Visa Signature)" -> "HDFC Regalia" */
+function getBase(name) {
+  if (!name) return "";
+  return String(name).replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
+/** Variant if present at end-in-parens: "… (Visa Signature)" -> "Visa Signature" */
+function getVariant(name) {
+  if (!name) return "";
+  const m = String(name).match(/\(([^)]+)\)\s*$/);
+  return m ? m[1].trim() : "";
+}
+
+/** Canonicalize some common brand spellings */
+function brandCanonicalize(text) {
+  let s = String(text || "");
+  s = s.replace(/\bMakemytrip\b/gi, "MakeMyTrip");
+  s = s.replace(/\bIcici\b/gi, "ICICI");
+  s = s.replace(/\bHdfc\b/gi, "HDFC");
+  s = s.replace(/\bSbi\b/gi, "SBI");
+  s = s.replace(/\bIdfc\b/gi, "IDFC");
+  s = s.replace(/\bPnb\b/gi, "PNB");
+  s = s.replace(/\bRbl\b/gi, "RBL");
+  s = s.replace(/\bYes\b/gi, "YES");
+  return s;
+}
+
+/** Levenshtein distance */
+function lev(a, b) {
+  a = toNorm(a);
+  b = toNorm(b);
+  const n = a.length,
+    m = b.length;
+  if (!n) return m;
+  if (!m) return n;
+  const d = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+  for (let i = 0; i <= n; i++) d[i][0] = i;
+  for (let j = 0; j <= m; j++) d[0][j] = j;
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(
+        d[i - 1][j] + 1,
+        d[i][j - 1] + 1,
+        d[i - 1][j - 1] + cost
       );
     }
   }
-  return matrix[b.length][a.length];
-};
+  return d[n][m];
+}
 
-const getMatchScore = (query, card) => {
-  if (!query || !card) return 0;
-  
-  const q = query.trim().toLowerCase();
-  const c = card.trim().toLowerCase();
-  
-  if (c === q) return 100;
-  if (c.includes(q)) return 90;
-  
-  const qWords = q.split(/\s+/);
-  const cWords = c.split(/\s+/);
-  
-  const wordMatches = qWords.filter(qWord => 
-    cWords.some(cWord => cWord.includes(qWord))
+function scoreCandidate(q, cand) {
+  const qs = toNorm(q);
+  const cs = toNorm(cand);
+  if (!qs) return 0;
+  if (cs.includes(qs)) return 100;
+
+  const qWords = qs.split(" ").filter(Boolean);
+  const cWords = cs.split(" ").filter(Boolean);
+
+  const matchingWords = qWords.filter((qw) =>
+    cWords.some((cw) => cw.includes(qw))
   ).length;
-  
-  const fuzzyWordMatches = qWords.filter(qWord => 
-    cWords.some(cWord => {
-      const distance = levenshteinDistance(qWord, cWord);
-      const maxLen = Math.max(qWord.length, cWord.length);
-      return distance <= 2 && (distance / maxLen) < 0.35;
-    })
-  ).length;
-  
-  const distance = levenshteinDistance(q, c);
-  const maxLen = Math.max(q.length, c.length);
-  const similarity = 1 - (distance / maxLen);
-  
-  return (
-    (wordMatches / qWords.length) * 0.5 +
-    (fuzzyWordMatches / qWords.length) * 0.3 +
-    similarity * 0.2
-  ) * 100;
-};
+  const sim = 1 - lev(qs, cs) / Math.max(qs.length, cs.length);
+  return (matchingWords / Math.max(1, qWords.length)) * 0.7 + sim * 0.3;
+}
 
-const highlightMatch = (text, query) => {
-  if (!query.trim()) return text;
+/** Dropdown entry builder */
+function makeEntry(raw, type) {
+  const base = brandCanonicalize(getBase(raw));
+  return { type, display: base, baseNorm: toNorm(base) };
+}
 
-  const regex = new RegExp(`(${query.trim().split(/\s+/).map(word =>
-    word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
-
-  return text.split(regex).map((part, i) =>
-    regex.test(part) ? <mark key={i}>{part}</mark> : part
+function normalizeUrl(u) {
+  if (!u) return "";
+  let s = String(u).trim().toLowerCase();
+  s = s.replace(/^https?:\/\//, "").replace(/^www\./, "");
+  if (s.endsWith("/")) s = s.slice(0, -1);
+  return s;
+}
+function normalizeText(s) {
+  return toNorm(s || "");
+}
+function offerKey(offer) {
+  const imgGuess =
+    firstField(offer, LIST_FIELDS.image) || firstFieldByContains(offer, "image");
+  const image = normalizeUrl(imgGuess || "");
+  const title = normalizeText(
+    firstField(offer, LIST_FIELDS.title) || offer.Website || ""
   );
+  const desc = normalizeText(firstField(offer, LIST_FIELDS.desc) || "");
+  const link = normalizeUrl(firstField(offer, LIST_FIELDS.link) || "");
+  return `${title}||${desc}||${image}||${link}`;
+}
+
+function dedupWrappers(arr, seen) {
+  const out = [];
+  for (const w of arr || []) {
+    const k = offerKey(w.offer);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(w);
+  }
+  return out;
+}
+
+/** classification helpers for DC/CC chips */
+const headerLooksDebit = (key) => {
+  const k = String(key).toLowerCase();
+  return /\bdebit\b/.test(k) && /\bcards?\b/.test(k);
+};
+const headerLooksCredit = (key) => {
+  const k = String(key).toLowerCase();
+  return /\bcredit\b/.test(k) && /\bcards?\b/.test(k);
+};
+const headerLooksEligibleCards = (key) => {
+  const k = String(key).toLowerCase();
+  return /\beligible\b/.test(k) && /\bcards?\b/.test(k);
 };
 
-const CreditCardDropdown = () => {
-  const [groupedCards, setGroupedCards] = useState({});
-  const [searchTerm, setSearchTerm] = useState("");
+function getRowTypeHint(row) {
+  for (const k of Object.keys(row || {})) {
+    const lk = k.toLowerCase();
+    if (
+      /\btype\b/.test(lk) ||
+      /\bcard\s*type\b/.test(lk) ||
+      /\bcategory\b/.test(lk) ||
+      /\bsegment\b/.test(lk)
+    ) {
+      const v = String(row[k] || "").toLowerCase();
+      if (/\bdebit\b/.test(v)) return "debit";
+      if (/\bcredit\b/.test(v)) return "credit";
+    }
+  }
+  return "";
+}
+
+function valueLooksDebit(s) {
+  return /\bdebit\b/i.test(String(s || ""));
+}
+function valueLooksCredit(s) {
+  return /\bcredit\b/i.test(String(s || ""));
+}
+
+/** Disclaimer */
+const Disclaimer = () => (
+  <section className="disclaimer">
+    <h3>Disclaimer</h3>
+    <p>
+      All offers, coupons, and discounts listed on our platform are provided for
+      informational purposes only. We do not guarantee the accuracy,
+      availability, or validity of any offer. Users are advised to verify the
+      terms and conditions with the respective merchants before making any
+      purchase. We are not responsible for any discrepancies, expired offers, or
+      losses arising from the use of these coupons.
+    </p>
+  </section>
+);
+
+/** -------------------- COMPONENT -------------------- */
+const AirlineOffers = () => {
+  // dropdown data (from allCards.csv ONLY)
+  const [creditEntries, setCreditEntries] = useState([]);
+  const [debitEntries, setDebitEntries] = useState([]);
+
+  // chip strips (from offer CSVs ONLY — NOT allCards.csv)
+  const [chipCC, setChipCC] = useState([]); // credit bases
+  const [chipDC, setChipDC] = useState([]); // debit bases
+
+  // ui state
   const [filteredCards, setFilteredCards] = useState([]);
-  const [selectedGroup, setSelectedGroup] = useState(null);
-  const [platformOffers, setPlatformOffers] = useState({
-    Eatsure: [],
-    Swiggy: [],
-    Zomato: []
-  });
-  const [noOffersMessage, setNoOffersMessage] = useState("");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(null); // {type, display, baseNorm}
+  const [noMatches, setNoMatches] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [showScrollButton, setShowScrollButton] = useState(false);
-  const [cardsLoaded, setCardsLoaded] = useState(false);
 
+  // offers (ONLY these 2 CSVs)
+  const [swiggyOffers, setSwiggyOffers] = useState([]);
+  const [zomatoOffers, setZomatoOffers] = useState([]);
+
+  // responsive
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth <= 768);
-    };
-
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-
-    return () => {
-      window.removeEventListener("resize", checkMobile);
-    };
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // 1) Load allCards.csv for dropdown lists ONLY
   useEffect(() => {
-    const hasOffers = Object.values(platformOffers).some(offers => offers.length > 0);
-    setShowScrollButton(hasOffers);
-  }, [platformOffers]);
-
-  const handleScrollDown = () => {
-    window.scrollBy({
-      top: window.innerHeight,
-      behavior: "smooth"
-    });
-  };
-
-  // Copy coupon to clipboard
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text).then(() => {
-      alert("Coupon copied to clipboard!");
-    });
-  };
-
-  // Fetch and parse CSV files
-  useEffect(() => {
-    const fetchAndParseCSV = (filePath) =>
-      new Promise((resolve, reject) => {
-        Papa.parse(filePath, {
-          download: true,
-          header: true,
-          complete: (results) => resolve(results.data),
-          error: (error) => reject(error),
-        });
-      });
-
-    const extractCreditCards = (data, platform) => {
-      const cards = [];
-      data.forEach((row) => {
-        const applicableCards = row["Applicable to Credit cards"];
-        if (applicableCards) {
-          const cardNames = applicableCards
-            .split(",")
-            .map((card) => {
-              const normalized = normalizeCardName(card);
-              return {
-                fullName: normalized,
-                baseName: getBaseCardName(normalized),
-                network: getNetworkVariant(normalized),
-                source: platform // Track where card came from
-              };
-            });
-          cards.push(...cardNames);
-        }
-      });
-      return cards;
-    };
-
-    const extractAllCards = (data) => {
-      const cards = [];
-      data.forEach((row) => {
-        const cardName = row["Applicable to Credit cards"];
-        if (cardName) {
-          const normalized = normalizeCardName(cardName);
-          cards.push({
-            fullName: normalized,
-            baseName: getBaseCardName(normalized),
-            network: getNetworkVariant(normalized),
-            source: "All Cards"
-          });
-        }
-      });
-      return cards;
-    };
-
-    const fetchData = async () => {
+    async function loadAllCards() {
       try {
-        const [swiggyData, zomatoData, eatsureData, allCardsData] = await Promise.all([
-          fetchAndParseCSV("/Swiggy.csv"),
-          fetchAndParseCSV("/Zomato.csv"),
-          fetchAndParseCSV("/Eatsure.csv"),
-          fetchAndParseCSV("/All Cards.csv")
+        const res = await axios.get(`/allCards.csv`);
+        const parsed = Papa.parse(res.data, { header: true });
+        const rows = parsed.data || [];
+
+        const creditMap = new Map();
+        const debitMap = new Map();
+
+        for (const row of rows) {
+          const ccList = splitList(firstField(row, LIST_FIELDS.credit));
+          for (const raw of ccList) {
+            const base = brandCanonicalize(getBase(raw));
+            const baseNorm = toNorm(base);
+            if (baseNorm) creditMap.set(baseNorm, creditMap.get(baseNorm) || base);
+          }
+          const dcList = splitList(firstField(row, LIST_FIELDS.debit));
+          for (const raw of dcList) {
+            const base = brandCanonicalize(getBase(raw));
+            const baseNorm = toNorm(base);
+            if (baseNorm) debitMap.set(baseNorm, debitMap.get(baseNorm) || base);
+          }
+        }
+
+        const credit = Array.from(creditMap.values())
+          .sort((a, b) => a.localeCompare(b))
+          .map((d) => makeEntry(d, "credit"));
+        const debit = Array.from(debitMap.values())
+          .sort((a, b) => a.localeCompare(b))
+          .map((d) => makeEntry(d, "debit"));
+
+        setCreditEntries(credit);
+        setDebitEntries(debit);
+
+        setFilteredCards([
+          ...(credit.length ? [{ type: "heading", label: "Credit Cards" }] : []),
+          ...credit,
+          ...(debit.length ? [{ type: "heading", label: "Debit Cards" }] : []),
+          ...debit,
         ]);
 
-        // Extract cards with source information
-        const swiggyCards = extractCreditCards(swiggyData, "Swiggy");
-        const zomatoCards = extractCreditCards(zomatoData, "Zomato");
-        const eatsureCards = extractCreditCards(eatsureData, "Eatsure");
-        const allCardsList = extractAllCards(allCardsData);
+        if (!credit.length && !debit.length) {
+          setNoMatches(true);
+          setSelected(null);
+        }
+      } catch (e) {
+        console.error("allCards.csv load error:", e);
+        setNoMatches(true);
+        setSelected(null);
+      }
+    }
+    loadAllCards();
+  }, []);
 
-        // Combine all cards, prioritizing offers CSVs
-        const allCardsCombined = [
-          ...swiggyCards, 
-          ...zomatoCards, 
-          ...eatsureCards,
-          ...allCardsList
+  // 2) Load offer CSVs (ONLY: swiggy, zomato)
+  useEffect(() => {
+    async function loadOffers() {
+      try {
+        const files = [
+          { name: "swiggy.csv", setter: setSwiggyOffers },
+          { name: "zomato.csv", setter: setZomatoOffers },
         ];
-        
-        // Group cards by base name and ensure variants are unique
-        const grouped = {};
-        allCardsCombined.forEach(card => {
-          const base = card.baseName;
-          if (!grouped[base]) {
-            grouped[base] = {
-              baseName: base,
-              variants: []
-            };
-          }
-          
-          // Check if variant already exists before adding
-          const exists = grouped[base].variants.some(
-            v => v.fullName === card.fullName
-          );
-          
-          if (!exists) {
-            grouped[base].variants.push(card);
-          }
-        });
 
-        setGroupedCards(grouped);
-        setCardsLoaded(true); 
-      } catch (error) {
-        console.error("Error fetching or parsing CSV files:", error);
-        setCardsLoaded(true);
+        await Promise.all(
+          files.map(async (f) => {
+            const res = await axios.get(`/${encodeURIComponent(f.name)}`);
+            const parsed = Papa.parse(res.data, { header: true });
+            f.setter(parsed.data || []);
+          })
+        );
+      } catch (e) {
+        console.error("Offer CSV load error:", e);
+      }
+    }
+    loadOffers();
+  }, []);
+
+  /** Build chip strips from OFFER CSVs (exclude allCards.csv) — with robust DC detection */
+  useEffect(() => {
+    const ccMap = new Map(); // baseNorm -> display
+    const dcMap = new Map();
+
+    const harvestList = (val, targetMap) => {
+      for (const raw of splitList(val)) {
+        const base = brandCanonicalize(getBase(raw));
+        const baseNorm = toNorm(base);
+        if (baseNorm) targetMap.set(baseNorm, targetMap.get(baseNorm) || base);
       }
     };
 
-    fetchData();
-  }, []);
+    const headerLooksCards = (k) => /\bcards?\b/i.test(k);
+    const harvestRows = (rows) => {
+      for (const o of rows || []) {
+        // explicit fields
+        const ccField =
+          firstField(o, LIST_FIELDS.credit) ||
+          firstFieldByContains(o, "eligible credit") ||
+          firstFieldByContains(o, "credit card");
+        if (ccField) harvestList(ccField, ccMap);
 
-  // Enhanced offer fetching with better matching
-  const fetchOffers = async (group) => {
-    const fetchAndParseCSV = (filePath) =>
-      new Promise((resolve, reject) => {
-        Papa.parse(filePath, {
-          download: true,
-          header: true,
-          skipEmptyLines: true,
-          complete: (results) => resolve(results.data),
-          error: (error) => reject(error),
-        });
-      });
+        const dcField =
+          firstField(o, LIST_FIELDS.debit) ||
+          firstFieldByContains(o, "eligible debit") ||
+          firstFieldByContains(o, "debit card");
+        if (dcField) harvestList(dcField, dcMap);
 
-    const filterOffers = (data, variant, platform) => {
-      return data
-        .filter((row) => {
-          // Skip rows with empty offer details
-          if (platform === "Zomato" && (!row["Offer"] || !row["Coupon Code"])) {
-            return false;
-          }
-          if (platform === "Swiggy" && (!row["Offer Title"] || !row["Offer Code"])) {
-            return false;
-          }
-          if (platform === "Eatsure" && (!row["Description"] || !row["Coupon Code"])) {
-            return false;
-          }
-          
-          if (!row["Applicable to Credit cards"]) return false;
-          
-          const rowCards = row["Applicable to Credit cards"]
-            .split(",")
-            .map(c => c.trim());
-            
-          return rowCards.some(rowCard => {
-            if (!rowCard) return false;
-            
-            const normalizedRowCard = normalizeCardName(rowCard);
-            const baseRowCard = getBaseCardName(normalizedRowCard);
-            
-            // NEW: Improved matching logic for base cards and variants
-            if (variant.network) {
-              // Specific variant: match by full name or base name
-              if (normalizedRowCard === variant.fullName || baseRowCard === variant.baseName) {
-                return true;
-              }
+        // mixed headers like "Eligible Cards" -> use type hint or per-token classification
+        const mixedHeaders = entriesWhereKey(
+          o,
+          (k) => headerLooksCards(k) && !headerLooksCredit(k) && !headerLooksDebit(k)
+        );
+        if (mixedHeaders.length) {
+          const typeHint = getRowTypeHint(o);
+          mixedHeaders.forEach(({ value }) => {
+            if (typeHint === "debit") {
+              harvestList(value, dcMap);
+            } else if (typeHint === "credit") {
+              harvestList(value, ccMap);
             } else {
-              // Base variant: only match by full name
-              if (normalizedRowCard === variant.fullName) {
-                return true;
+              for (const tok of splitList(value)) {
+                const base = brandCanonicalize(getBase(tok));
+                const baseNorm = toNorm(base);
+                if (!baseNorm) continue;
+                if (valueLooksDebit(tok)) dcMap.set(baseNorm, dcMap.get(baseNorm) || base);
+                else if (valueLooksCredit(tok)) ccMap.set(baseNorm, ccMap.get(baseNorm) || base);
               }
             }
-            return false;
           });
-        })
-        .map((row) => {
-          const offer = {};
-          switch(platform) {
-            case "Eatsure":
-              offer.description = row["Description"];
-              offer.coupon = row["Coupon Code"];
-              break;
-            case "Swiggy":
-              offer.title = row["Offer Title"];
-              offer.description = row["Offer Description"];
-              offer.terms = row["Terms and Conditions"];
-              offer.coupon = row["Offer Code"];
-              offer.link = row["Link to Apply Coupon"];
-              break;
-            case "Zomato":
-              offer.offer = row["Offer"];
-              offer.terms = row["Terms and Conditions"];
-              offer.coupon = row["Coupon Code"];
-              break;
-          }
-          
-          // NEW: Improved variant detection
-          const matchedCard = row["Applicable to Credit cards"]
-            .split(",")
-            .find(c => {
-              const normalized = normalizeCardName(c.trim());
-              const base = getBaseCardName(normalized);
-              const network = getNetworkVariant(normalized);
-              
-              if (variant.network) {
-                // For variant cards
-                return (
-                  normalized === variant.fullName || 
-                  base === variant.baseName
-                );
-              } else {
-                // For base cards
-                return normalized === variant.fullName;
-              }
-            });
-          
-          if (matchedCard) {
-            const variantMatch = getNetworkVariant(normalizeCardName(matchedCard));
-            if (variantMatch) {
-              // Preserve the original variant name from CSV
-              offer.variant = variantMatch;
-            }
-          }
-          
-          return offer;
-        });
-    };    
-
-    try {
-      const [swiggyData, zomatoData, eatsureData] = await Promise.all([
-        fetchAndParseCSV("/Swiggy.csv"),
-        fetchAndParseCSV("/Zomato.csv"),
-        fetchAndParseCSV("/Eatsure.csv")
-      ]);
-
-      // Collect offers from all variants in the group
-      const eatsureOffers = [];
-      const swiggyOffers = [];
-      const zomatoOffers = [];
-      
-      for (const variant of group.variants) {
-        // Only include offers from their source platforms
-        if (variant.source === "Eatsure" || variant.source === "All Cards") {
-          eatsureOffers.push(...filterOffers(eatsureData, variant, "Eatsure"));
-        }
-        if (variant.source === "Swiggy" || variant.source === "All Cards") {
-          swiggyOffers.push(...filterOffers(swiggyData, variant, "Swiggy"));
-        }
-        if (variant.source === "Zomato" || variant.source === "All Cards") {
-          zomatoOffers.push(...filterOffers(zomatoData, variant, "Zomato"));
         }
       }
+    };
 
-      // Remove duplicate offers
-      const uniqueOffers = (offers) => {
-        const seen = new Set();
-        return offers.filter(offer => {
-          const key = `${offer.description || offer.title || offer.offer}-${offer.coupon}`;
-          if (seen.has(key)) {
-            return false;
-          }
-          seen.add(key);
-          return true;
-        });
-      };
+    // Only Swiggy + Zomato feed the marquee chips
+    harvestRows(swiggyOffers);
+    harvestRows(zomatoOffers);
 
-      setPlatformOffers({
-        Eatsure: uniqueOffers(eatsureOffers),
-        Swiggy: uniqueOffers(swiggyOffers),
-        Zomato: uniqueOffers(zomatoOffers)
-      });
+    setChipCC(Array.from(ccMap.values()).sort((a, b) => a.localeCompare(b)));
+    setChipDC(Array.from(dcMap.values()).sort((a, b) => a.localeCompare(b)));
+  }, [swiggyOffers, zomatoOffers]);
 
-      // Show message only if no offers found across all platforms
-      if (eatsureOffers.length === 0 && 
-          swiggyOffers.length === 0 && 
-          zomatoOffers.length === 0) {
-        setNoOffersMessage("No offers found for this card.");
-      } else {
-        setNoOffersMessage("");
-      }
-    } catch (error) {
-      console.error("Error fetching or filtering offers:", error);
-      setNoOffersMessage("Error fetching offers. Please try again.");
+  /** search box */
+  const onChangeQuery = (e) => {
+    const val = e.target.value;
+    setQuery(val);
+
+    if (!val.trim()) {
+      setFilteredCards([]);
+      setSelected(null);
+      setNoMatches(false);
+      return;
     }
-  };
 
-  // Enhanced card existence check
-  const cardExists = (cardName) => {
-    const normalized = normalizeCardName(cardName);
-    const baseName = getBaseCardName(normalized);
-    
-    // Check if any card matches by base name or full name
-    return Object.values(groupedCards).some(group => 
-      group.baseName === baseName ||
-      group.variants.some(v => v.fullName === normalized)
-    );
-  };
+    const q = val.trim().toLowerCase();
+    const scored = (arr) =>
+      arr
+        .map((it) => {
+          const s = scoreCandidate(val, it.display);
+          const inc = it.display.toLowerCase().includes(q);
+          return { it, s, inc };
+        })
+        .filter(({ s, inc }) => inc || s > 0.3)
+        .sort((a, b) => (b.s - a.s) || a.it.display.localeCompare(b.it.display))
+        .slice(0, MAX_SUGGESTIONS)
+        .map(({ it }) => it);
 
-  // Handle search input
-  const handleSearchChange = (e) => {
-    const value = e.target.value;
-    setSearchTerm(value);
-    
-    setSelectedGroup(null);
-    setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
-    setNoOffersMessage("");
+    const cc = scored(creditEntries);
+    const dc = scored(debitEntries);
 
-    if (value === "") {
+    if (!cc.length && !dc.length) {
+      setNoMatches(true);
+      setSelected(null);
       setFilteredCards([]);
       return;
     }
 
-    const matchingGroups = Object.values(groupedCards)
-      .map(group => ({
-        ...group,
-        score: getMatchScore(value, group.baseName)
-      }))
-      .filter(group => group.score > 40)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+    // 🔸 NEW: If input suggests "debit intent", show DC first then CC
+    const s = val.toLowerCase();
+    const isDebitIntent =
+      s.includes("debit") ||
+      /\bdebit\s*card(s)?\b/i.test(val) ||
+      /\bdc\b/i.test(val);
 
-    setFilteredCards(matchingGroups);
-    
-    // Show error if no matches found and card doesn't exist
-    if (matchingGroups.length === 0 && !cardExists(value)) {
-      setNoOffersMessage("Card not found in our database. Please try another name.");
+    setNoMatches(false);
+    if (isDebitIntent) {
+      setFilteredCards([
+        ...(dc.length ? [{ type: "heading", label: "Debit Cards" }] : []),
+        ...dc,
+        ...(cc.length ? [{ type: "heading", label: "Credit Cards" }] : []),
+        ...cc,
+      ]);
+    } else {
+      setFilteredCards([
+        ...(cc.length ? [{ type: "heading", label: "Credit Cards" }] : []),
+        ...cc,
+        ...(dc.length ? [{ type: "heading", label: "Debit Cards" }] : []),
+        ...dc,
+      ]);
     }
   };
 
-  // Handle card selection
-  const handleCardSelect = (group) => {
-    setSelectedGroup(group);
-    setSearchTerm(group.baseName);
+  const onPick = (entry) => {
+    setSelected(entry);
+    setQuery(entry.display);
     setFilteredCards([]);
-    setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
-    setNoOffersMessage("");
-    fetchOffers(group);
+    setNoMatches(false);
   };
 
-  // Handle Enter key press
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      setNoOffersMessage("");
-      setPlatformOffers({ Eatsure: [], Swiggy: [], Zomato: [] });
+  // Chip click → set the dropdown + selected entry
+  const handleChipClick = (name, type) => {
+    const display = brandCanonicalize(getBase(name));
+    const baseNorm = toNorm(display);
+    setQuery(display);
+    setSelected({ type, display, baseNorm });
+    setFilteredCards([]);
+    setNoMatches(false);
+  };
 
-      if (filteredCards.length > 0) {
-        handleCardSelect(filteredCards[0]);
-      } else if (searchTerm.trim() !== '') {
-        if (!cardExists(searchTerm)) {
-          setSelectedGroup(null);
-          setNoOffersMessage("Card not found in our database. Please try another name.");
-          return;
+  /** Build matches for one CSV: return wrappers {offer, site, variantText} */
+  function matchesFor(offers, type, site) {
+    if (!selected) return [];
+    const out = [];
+    for (const o of offers || []) {
+      let list = [];
+      if (type === "debit") {
+        const dcExplicit =
+          firstField(o, LIST_FIELDS.debit) ||
+          firstFieldByContains(o, "eligible debit") ||
+          firstFieldByContains(o, "debit card");
+        const dcFromHeaders = dcExplicit ? splitList(dcExplicit) : [];
+        let dc = [...dcFromHeaders];
+
+        if (!dc.length) {
+          const typeHint = getRowTypeHint(o);
+          const mixed =
+            firstFieldByContains(o, "eligible cards") ||
+            firstFieldByContains(o, "cards");
+          if (mixed && typeHint === "debit") {
+            dc = splitList(mixed);
+          }
         }
-        
-        // Find the group for this card
-        const normalizedInput = normalizeCardName(searchTerm.trim());
-        const baseInput = getBaseCardName(normalizedInput);
-        const group = groupedCards[baseInput];
-        
-        if (group) {
-          setSelectedGroup(group);
-          fetchOffers(group);
-        } else {
-          setNoOffersMessage("Card not found in our database. Please try another name.");
+        if (!dc.length) {
+          const tokens = Object.values(o || {})
+            .filter((v) => typeof v === "string")
+            .flatMap((v) => splitList(v))
+            .filter((t) => /\bdebit\b/i.test(t));
+          dc = tokens;
+        }
+        list = dc;
+      } else {
+        const cc =
+          firstField(o, LIST_FIELDS.credit) ||
+          firstFieldByContains(o, "eligible credit") ||
+          firstFieldByContains(o, "credit card") ||
+          firstFieldByContains(o, "eligible cards");
+        list = splitList(cc);
+      }
+
+      let matched = false;
+      let matchedVariant = "";
+      for (const raw of list) {
+        const base = brandCanonicalize(getBase(raw));
+        if (toNorm(base) === selected.baseNorm) {
+          matched = true;
+          const v = getVariant(raw);
+          if (v) matchedVariant = v;
+          break;
         }
       }
+      if (matched) {
+        out.push({ offer: o, site, variantText: matchedVariant });
+      }
     }
-  };
+    return out;
+  }
 
-  // Render offer cards based on platform
-  const renderOfferCards = () => {
-    return Object.entries(platformOffers).map(([platform, offers]) => {
-      if (offers.length === 0) return null;
+  // Collect then global-dedup
+  const wSwiggy = matchesFor(
+    swiggyOffers,
+    selected?.type === "debit" ? "debit" : "credit",
+    "Swiggy"
+  );
+  const wZomato = matchesFor(
+    zomatoOffers,
+    selected?.type === "debit" ? "debit" : "credit",
+    "Zomato"
+  );
 
-      return (
-        <div key={platform} className="platform-offers">
-          <h2 style={{ textAlign: 'center' }}>Offers on {platform}</h2>
-          <div className="offers-container">
-            {offers.map((offer, index) => (
-              <div key={index} className="offer-card">
-                {platform === "Eatsure" && (
-                  <>
-                    <p><strong>Description:</strong> {offer.description}</p>
-                    {offer.variant && (
-                      <p className="network-note">
-                        <strong>Note:</strong> This benefit is applicable only on <em>{offer.variant}</em> variant
-                      </p>
-                    )}
-                    <p>
-                      <strong>Coupon Code:</strong> {offer.coupon}
-                      <button 
-                        onClick={() => copyToClipboard(offer.coupon)}
-                        className="copy-button"
-                      >
-                        📋
-                      </button>
-                    </p>
-                  </>
-                )}
-                
-                {platform === "Swiggy" && (
-                  <>
-                    <p><strong>Offer Title:</strong> {offer.title}</p>
-                    <p><strong>Description:</strong> {offer.description}</p>
-                    <p><strong>Terms & Conditions:</strong> {offer.terms}</p>
-                    {offer.variant && (
-                      <p className="network-note">
-                        <strong>Note:</strong> This benefit is applicable only on <em>{offer.variant}</em> variant
-                      </p>
-                    )}
-                    <p><strong>Coupon Code:</strong> {offer.coupon} <button 
-                        onClick={() => copyToClipboard(offer.coupon)}
-                        className="copy-button"
-                      >
-                        📋
-                      </button></p>
-                    
-                    {offer.link && (
-                      <a 
-                        href={offer.link} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="offer-link"
-                      >
-                        View Offer
-                      </a>
-                    )}
-                  </>
-                )}
-                
-                {platform === "Zomato" && (
-                  <>
-                    <p><strong>Offer:</strong> {offer.offer}</p>
-                    <div className="terms-container">
-                      <strong>Terms & Conditions:</strong>
-                      <div>
-                        {offer.terms}
-                      </div>
-                    </div>
-                    {offer.variant && (
-                      <p className="network-note">
-                        <strong>Note:</strong> This benefit is applicable only on <em>{offer.variant}</em> variant
-                      </p>
-                    )}
-                    <p>
-                      <strong>Coupon Code:</strong> {offer.coupon}
-                      <button 
-                        onClick={() => copyToClipboard(offer.coupon)}
-                        className="copy-button"
-                      >
-                        📋
-                      </button>
-                    </p>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    });
-  };
+  const seen = new Set();
+  const dSwiggy = dedupWrappers(wSwiggy, seen);
+  const dZomato = dedupWrappers(wZomato, seen);
 
-  return (
-    <div className="container">
-      <div className="search-section" style={{ display: 'flex', justifyContent: 'center' }}>
-        <div style={{ width: '100%', maxWidth: '600px' }}>
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={handleSearchChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Search your credit card..."
-            className="search-input"
-          />
-          {filteredCards.length > 0 && (
-            <ul className="dropdown-list">
-              {filteredCards.map((group, index) => (
-                <li
-                  key={index}
-                  className="dropdown-item"
-                  onClick={() => handleCardSelect(group)}
-                >
-                  {highlightMatch(group.baseName, searchTerm)}
-                </li>
-              ))}
-            </ul>
+  const hasAny = Boolean(dSwiggy.length || dZomato.length);
+
+  /** Offer card UI (Swiggy/Zomato use the same fields) */
+  const OfferCard = ({ wrapper }) => {
+    const o = wrapper.offer;
+
+    // fields: Offer, Description, Image(s), Link
+    const title =
+      o["Offer"] ||
+      firstField(o, LIST_FIELDS.title) ||
+      o.Website ||
+      "Offer";
+    const desc =
+      o["Description"] ||
+      firstField(o, LIST_FIELDS.desc) ||
+      "";
+    const image =
+      o["Images"] ||
+      firstField(o, LIST_FIELDS.image) ||
+      "";
+    const link = firstField(o, LIST_FIELDS.link);
+
+    const showVariantNote =
+      VARIANT_NOTE_SITES.has(wrapper.site) &&
+      wrapper.variantText &&
+      wrapper.variantText.trim().length > 0;
+
+    return (
+      <div className="offer-card">
+        {image && <img src={image} alt={title} />}
+        <div className="offer-info">
+          <h3 className="offer-title">{title}</h3>
+          {desc && <p className="offer-desc">{desc}</p>}
+
+          {showVariantNote && (
+            <p className="network-note">
+              <strong>Note:</strong> This benefit is applicable only on <em>{wrapper.variantText}</em> variant
+            </p>
+          )}
+
+          {link && (
+            <button className="btn" onClick={() => window.open(link, "_blank")}>
+              View Offer
+            </button>
           )}
         </div>
       </div>
+    );
+  };
 
-      {noOffersMessage && (
-        <p className="no-offers-message" style={{ 
-          textAlign: 'center', 
-          color: noOffersMessage.includes("not found") ? '#FF0000' : '#1e7145',
-          fontWeight: 'bold',
-          margin: '20px auto',
-          maxWidth: '600px'
-        }}>
-          {noOffersMessage}
-        </p>
-      )}
-
-      {selectedGroup && !noOffersMessage && (
-        <div className="offers-section" style={{ display: 'flex', justifyContent: 'center' }}>
-          <div style={{ width: '100%', maxWidth: '800px' }}>
-            {renderOfferCards()}
-          </div>
-        </div>
-      )}
-      
-      {showScrollButton && (
-        <button 
-          onClick={handleScrollDown}
-          className="scroll-button"
+  return (
+    <div className="App" style={{ fontFamily: "'Libre Baskerville', serif" }}>
+      {/* 🔹 Cards-with-offers strip container */}
+      {(chipCC.length > 0 || chipDC.length > 0) && (
+        <div
           style={{
-            position: 'fixed',
-            right: '20px',
-            bottom: isMobile ? '20px' : '150px',
-            padding: isMobile ? '12px 15px' : '10px 20px',
-            backgroundColor: '#1e7145',
-            color: 'white',
-            border: 'none',
-            borderRadius: isMobile ? '50%' : '8px',
-            cursor: 'pointer',
-            fontSize: '18px',
-            zIndex: 1000,
-            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-            width: isMobile ? '50px' : '140px',
-            height: isMobile ? '50px' : '50px',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            marginBottom: '300px'
+            maxWidth: 1200,
+            margin: "14px auto 0",
+            padding: "14px 16px",
+            background: "#F7F9FC",
+            border: "1px solid #E8EDF3",
+            borderRadius: 10,
+            boxShadow: "0 6px 18px rgba(15,23,42,.06)",
           }}
         >
-          {isMobile ? '↓' : 'Scroll Down'}
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: 16,
+              color: "#1F2D45",
+              marginBottom: 10,
+              display: "flex",
+              justifyContent: "center",
+              gap: 8,
+            }}
+          >
+            <span>Credit And Debit Cards Which Have Offers</span>
+          </div>
+
+          {/* Credit strip */}
+          {chipCC.length > 0 && (
+            <marquee direction="left" scrollamount="4" style={{ marginBottom: 8, whiteSpace: "nowrap" }}>
+              <strong style={{ marginRight: 10, color: "#1F2D45" }}>Credit Cards:</strong>
+              {chipCC.map((name, idx) => (
+                <span
+                  key={`cc-chip-${idx}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleChipClick(name, "credit")}
+                  onKeyDown={(e) => (e.key === "Enter" ? handleChipClick(name, "credit") : null)}
+                  style={{
+                    display: "inline-block",
+                    padding: "6px 10px",
+                    border: "1px solid #E0E6EE",
+                    borderRadius: 9999,
+                    marginRight: 8,
+                    background: "#fff",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    lineHeight: 1.2,
+                    userSelect: "none",
+                  }}
+                  onMouseOver={(e) => (e.currentTarget.style.background = "#F0F5FF")}
+                  onMouseOut={(e) => (e.currentTarget.style.background = "#fff")}
+                  title="Click to select this card"
+                >
+                  {name}
+                </span>
+              ))}
+            </marquee>
+          )}
+
+          {/* Debit strip */}
+          {chipDC.length > 0 && (
+            <marquee direction="left" scrollamount="4" style={{ whiteSpace: "nowrap" }}>
+              <strong style={{ marginRight: 10, color: "#1F2D45" }}>Debit Cards:</strong>
+              {chipDC.map((name, idx) => (
+                <span
+                  key={`dc-chip-${idx}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleChipClick(name, "debit")}
+                  onKeyDown={(e) => (e.key === "Enter" ? handleChipClick(name, "debit") : null)}
+                  style={{
+                    display: "inline-block",
+                    padding: "6px 10px",
+                    border: "1px solid #E0E6EE",
+                    borderRadius: 9999,
+                    marginRight: 8,
+                    background: "#fff",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    lineHeight: 1.2,
+                    userSelect: "none",
+                  }}
+                  onMouseOver={(e) => (e.currentTarget.style.background = "#F0F5FF")}
+                  onMouseOut={(e) => (e.currentTarget.style.background = "#fff")}
+                  title="Click to select this card"
+                >
+                  {name}
+                </span>
+              ))}
+            </marquee>
+          )}
+        </div>
+      )}
+
+      {/* Search / dropdown */}
+      <div className="dropdown" style={{ position: "relative", width: "600px", margin: "20px auto" }}>
+        <input
+          type="text"
+          value={query}
+          onChange={onChangeQuery}
+          placeholder="Type a Credit or Debit Card...."
+          className="dropdown-input"
+          style={{
+            width: "100%",
+            padding: "12px",
+            fontSize: "16px",
+            border: `1px solid ${noMatches ? "#d32f2f" : "#ccc"}`,
+            borderRadius: "6px",
+          }}
+        />
+        {query.trim() && !!filteredCards.length && (
+          <ul
+            className="dropdown-list"
+            style={{
+              listStyle: "none",
+              padding: "10px",
+              margin: 0,
+              width: "100%",
+              maxHeight: "260px",
+              overflowY: "auto",
+              border: "1px solid #ccc",
+              borderRadius: "6px",
+              backgroundColor: "#fff",
+              position: "absolute",
+              zIndex: 1000,
+            }}
+          >
+            {filteredCards.map((item, idx) =>
+              item.type === "heading" ? (
+                <li key={`h-${idx}`} style={{ padding: "8px 10px", fontWeight: 700, background: "#fafafa" }}>
+                  {item.label}
+                </li>
+              ) : (
+                <li
+                  key={`i-${idx}-${item.display}`}
+                  onClick={() => onPick(item)}
+                  style={{
+                    padding: "10px",
+                    cursor: "pointer",
+                    borderBottom: "1px solid #f2f2f2",
+                  }}
+                  onMouseOver={(e) => (e.currentTarget.style.background = "#f7f9ff")}
+                  onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  {item.display}
+                </li>
+              )
+            )}
+          </ul>
+        )}
+      </div>
+
+      {noMatches && query.trim() && (
+        <p style={{ color: "#d32f2f", textAlign: "center", marginTop: 8 }}>
+          No matching cards found. Please try a different name.
+        </p>
+      )}
+
+      {/* Offers by section */}
+      {selected && hasAny && !noMatches && (
+        <div className="offers-section" style={{ maxWidth: 1200, margin: "0 auto", padding: 20 }}>
+          {!!dSwiggy.length && (
+            <div className="offer-group">
+              <h2 style={{ textAlign: "center" }}>Offers On Swiggy</h2>
+              <div className="offer-grid">
+                {dSwiggy.map((w, i) => (
+                  <OfferCard key={`sw-${i}`} wrapper={w} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!!dZomato.length && (
+            <div className="offer-group">
+              <h2 style={{ textAlign: "center" }}>Offers On Zomato</h2>
+              <div className="offer-grid">
+                {dZomato.map((w, i) => (
+                  <OfferCard key={`zo-${i}`} wrapper={w} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {selected && !hasAny && !noMatches && (
+        <p style={{ color: "#d32f2f", textAlign: "center", marginTop: 10 }}>
+          No offer available for this card
+        </p>
+      )}
+
+      {selected && hasAny && !noMatches && (
+        <button
+          onClick={() => window.scrollBy({ top: window.innerHeight, behavior: "smooth" })}
+          style={{
+            position: "fixed",
+            right: 20,
+            bottom: isMobile ? 220 : 250,
+            padding: isMobile ? "12px 15px" : "10px 20px",
+            backgroundColor: "#1e7145",
+            color: "white",
+            border: "none",
+            borderRadius: isMobile ? "50%" : 8,
+            cursor: "pointer",
+            fontSize: 18,
+            zIndex: 1000,
+            boxShadow: "0 2px 5px rgba(0,0,0,0.2)",
+            width: isMobile ? 50 : 140,
+            height: isMobile ? 50 : 50,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+          }}
+        >
+          {isMobile ? "↓" : "Scroll Down"}
         </button>
       )}
-      
-      <div className="bottom-disclaimer">
-        <h3>Disclaimer</h3>
-        <p>
-          All offers, coupons, and discounts listed on our platform are provided for informational purposes only. 
-          We do not guarantee the accuracy, availability, or validity of any offer. Users are advised to verify 
-          the terms and conditions with the respective merchants before making any purchase. We are not responsible 
-          for any discrepancies, expired offers, or losses arising from the use of these coupons.
-        </p>
-      </div>
+
+      <Disclaimer />
     </div>
   );
 };
 
-export default CreditCardDropdown;
+export default AirlineOffers;
