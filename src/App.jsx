@@ -18,6 +18,47 @@ const MAX_SUGGESTIONS = 50;
 /** Sites that should display the red per-card “Applicable only on {variant} variant” note */
 const VARIANT_NOTE_SITES = new Set(["Swiggy", "Zomato"]);
 
+/** -------------------- IMAGE FALLBACKS -------------------- */
+/* Keys must match wrapper.site lowercased */
+const FALLBACK_IMAGE_BY_SITE = {
+  swiggy:
+    "https://bsmedia.business-standard.com/_media/bs/img/article/2023-07/17/full/1689574606-2001.png",
+  zomato:
+    "https://c.ndtvimg.com/2024-06/mr51ho8o_zomato-logo-stock-image_625x300_03_June_24.jpg?im=FeatureCrop,algorithm=dnn,width=545,height=307",
+};
+
+function isUsableImage(val) {
+  if (!val) return false;
+  const s = String(val).trim();
+  if (!s) return false;
+  if (/^(na|n\/a|null|undefined|-|image unavailable)$/i.test(s)) return false;
+  return true;
+}
+
+/** Decide which image to show + whether it's a fallback (logo) */
+function resolveImage(siteKey, candidate) {
+  const key = String(siteKey || "").toLowerCase();
+  const fallback = FALLBACK_IMAGE_BY_SITE[key];
+  const usingFallback = !isUsableImage(candidate) && !!fallback;
+  return {
+    src: usingFallback ? fallback : candidate,
+    usingFallback,
+  };
+}
+
+/** If the image fails to load, switch to fallback and mark as fallback for CSS */
+function handleImgError(e, siteKey) {
+  const key = String(siteKey || "").toLowerCase();
+  const fallback = FALLBACK_IMAGE_BY_SITE[key];
+  const el = e.currentTarget;
+  if (fallback && el.src !== fallback) {
+    el.src = fallback;
+    el.classList.add("is-fallback");
+  } else {
+    el.style.display = "none"; // hide if even fallback fails
+  }
+}
+
 /** -------------------- HELPERS -------------------- */
 const toNorm = (s) =>
   String(s || "")
@@ -79,13 +120,13 @@ function splitList(val) {
     .filter(Boolean);
 }
 
-/** Strip trailing parentheses: "HDFC Regalia (Visa Signature)" -> "HDFC Regalia" */
+/** Strip trailing parentheses */
 function getBase(name) {
   if (!name) return "";
   return String(name).replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
-/** Variant if present at end-in-parens: "… (Visa Signature)" -> "Visa Signature" */
+/** Variant if present at end-in-parens */
 function getVariant(name) {
   if (!name) return "";
   const m = String(name).match(/\(([^)]+)\)\s*$/);
@@ -216,12 +257,8 @@ function getRowTypeHint(row) {
   return "";
 }
 
-function valueLooksDebit(s) {
-  return /\bdebit\b/i.test(String(s || ""));
-}
-function valueLooksCredit(s) {
-  return /\bcredit\b/i.test(String(s || ""));
-}
+function valueLooksDebit(s) { return /\bdebit\b/i.test(String(s || "")); }
+function valueLooksCredit(s) { return /\bcredit\b/i.test(String(s || "")); }
 
 /** Disclaimer */
 const Disclaimer = () => (
@@ -444,7 +481,7 @@ const AirlineOffers = () => {
       return;
     }
 
-    // 🔸 NEW: If input suggests "debit intent", show DC first then CC
+    // NEW: debit-intent → DC first
     const s = val.toLowerCase();
     const isDebitIntent =
       s.includes("debit") ||
@@ -562,7 +599,7 @@ const AirlineOffers = () => {
 
   const hasAny = Boolean(dSwiggy.length || dZomato.length);
 
-  /** Offer card UI (Swiggy/Zomato use the same fields) */
+  /** Offer card UI (Swiggy/Zomato) with image fallback handling */
   const OfferCard = ({ wrapper }) => {
     const o = wrapper.offer;
 
@@ -576,7 +613,7 @@ const AirlineOffers = () => {
       o["Description"] ||
       firstField(o, LIST_FIELDS.desc) ||
       "";
-    const image =
+    const candidateImage =
       o["Images"] ||
       firstField(o, LIST_FIELDS.image) ||
       "";
@@ -587,9 +624,20 @@ const AirlineOffers = () => {
       wrapper.variantText &&
       wrapper.variantText.trim().length > 0;
 
+    // Decide actual image (poster vs site-logo)
+    const siteKey = String(wrapper.site || "").toLowerCase();
+    const { src: imgSrc, usingFallback } = resolveImage(siteKey, candidateImage);
+
     return (
       <div className="offer-card">
-        {image && <img src={image} alt={title} />}
+        {imgSrc && (
+          <img
+            className={`offer-img ${usingFallback ? "is-fallback" : ""}`}
+            src={imgSrc}
+            alt={title}
+            onError={(e) => handleImgError(e, siteKey)}
+          />
+        )}
         <div className="offer-info">
           <h3 className="offer-title">{title}</h3>
           {desc && <p className="offer-desc">{desc}</p>}
@@ -612,7 +660,7 @@ const AirlineOffers = () => {
 
   return (
     <div className="App" style={{ fontFamily: "'Libre Baskerville', serif" }}>
-      {/* 🔹 Cards-with-offers strip container */}
+      {/* Cards-with-offers strip container */}
       {(chipCC.length > 0 || chipDC.length > 0) && (
         <div
           style={{
