@@ -187,6 +187,35 @@ function scoreCandidate(q, cand) {
   return (matchingWords / Math.max(1, qWords.length)) * 0.7 + sim * 0.3;
 }
 
+/** 🔹 Generic fuzzy name matcher: handles typos like "selct", "reglia", etc. */
+function isFuzzyNameMatch(query, label) {
+  const q = toNorm(query);
+  const l = toNorm(label);
+  if (!q || !l) return false;
+
+  // direct substring
+  if (l.includes(q)) return true;
+
+  // whole-string similarity
+  const wholeDist = lev(q, l);
+  const wholeSim = 1 - wholeDist / Math.max(q.length, l.length);
+  if (wholeSim >= 0.6) return true;
+
+  // per-word similarity (e.g. "selct" ≈ "select")
+  const qWords = q.split(" ").filter(Boolean);
+  const lWords = l.split(" ").filter(Boolean);
+  for (const qw of qWords) {
+    if (qw.length < 3) continue;
+    for (const lw of lWords) {
+      if (lw.length < 3) continue;
+      const d = lev(qw, lw);
+      const sim = 1 - d / Math.max(qw.length, lw.length);
+      if (sim >= 0.7) return true;
+    }
+  }
+  return false;
+}
+
 /** Dropdown entry builder */
 function makeEntry(raw, type) {
   const base = brandCanonicalize(getBase(raw));
@@ -257,8 +286,12 @@ function getRowTypeHint(row) {
   return "";
 }
 
-function valueLooksDebit(s) { return /\bdebit\b/i.test(String(s || "")); }
-function valueLooksCredit(s) { return /\bcredit\b/i.test(String(s || "")); }
+function valueLooksDebit(s) {
+  return /\bdebit\b/i.test(String(s || ""));
+}
+function valueLooksCredit(s) {
+  return /\bcredit\b/i.test(String(s || ""));
+}
 
 /** Disclaimer */
 const Disclaimer = () => (
@@ -430,7 +463,8 @@ const AirlineOffers = () => {
                 const baseNorm = toNorm(base);
                 if (!baseNorm) continue;
                 if (valueLooksDebit(tok)) dcMap.set(baseNorm, dcMap.get(baseNorm) || base);
-                else if (valueLooksCredit(tok)) ccMap.set(baseNorm, ccMap.get(baseNorm) || base);
+                else if (valueLooksCredit(tok))
+                  ccMap.set(baseNorm, ccMap.get(baseNorm) || base);
               }
             }
           });
@@ -446,33 +480,46 @@ const AirlineOffers = () => {
     setChipDC(Array.from(dcMap.values()).sort((a, b) => a.localeCompare(b)));
   }, [swiggyOffers, zomatoOffers]);
 
-  /** search box */
+  /** 🔹 UPDATED search box:
+   *  - Fuzzy match for any typo (e.g. "selct")
+   *  - "Select" cards boosted to top
+   *  - If query mentions dc/debit/debit card → show Debit section first
+   */
   const onChangeQuery = (e) => {
     const val = e.target.value;
     setQuery(val);
 
-    if (!val.trim()) {
+    const trimmed = val.trim();
+    if (!trimmed) {
       setFilteredCards([]);
       setSelected(null);
       setNoMatches(false);
       return;
     }
 
-    const q = val.trim().toLowerCase();
+    const qLower = trimmed.toLowerCase();
+
     const scored = (arr) =>
       arr
         .map((it) => {
-          const s = scoreCandidate(val, it.display);
-          const inc = it.display.toLowerCase().includes(q);
-          return { it, s, inc };
+          const baseScore = scoreCandidate(trimmed, it.display);
+          const inc = it.display.toLowerCase().includes(qLower);
+          const fuzzy = isFuzzyNameMatch(trimmed, it.display);
+
+          // Boost exact substring + fuzzy matches
+          let s = baseScore;
+          if (inc) s += 2.0;
+          if (fuzzy) s += 1.5;
+
+          return { it, s, inc, fuzzy };
         })
-        .filter(({ s, inc }) => inc || s > 0.3)
-        .sort((a, b) => (b.s - a.s) || a.it.display.localeCompare(b.it.display))
+        .filter(({ s, inc, fuzzy }) => inc || fuzzy || s > 0.3)
+        .sort((a, b) => b.s - a.s || a.it.display.localeCompare(b.it.display))
         .slice(0, MAX_SUGGESTIONS)
         .map(({ it }) => it);
 
-    const cc = scored(creditEntries);
-    const dc = scored(debitEntries);
+    let cc = scored(creditEntries);
+    let dc = scored(debitEntries);
 
     if (!cc.length && !dc.length) {
       setNoMatches(true);
@@ -481,15 +528,48 @@ const AirlineOffers = () => {
       return;
     }
 
-    // NEW: debit-intent → DC first
-    const s = val.toLowerCase();
+    /** --- SPECIAL CASE 1: "select credit card" / "selct" etc. → boost Select cards first --- */
+    const qNorm = toNorm(trimmed);
+    const qWords = qNorm.split(" ").filter(Boolean);
+
+    const hasSelectWord = qWords.some((w) => {
+      if (w === "select") return true;
+      const d = lev(w, "select");
+      const sim = 1 - d / Math.max(w.length, "select".length);
+      return sim >= 0.7; // "selct", "selec", etc.
+    });
+
+    const isSelectIntent =
+      qNorm.includes("select credit card") || qNorm.includes("select card") || hasSelectWord;
+
+    if (isSelectIntent) {
+      const reorderBySelect = (arr) => {
+        const selectCards = [];
+        const others = [];
+        arr.forEach((item) => {
+          const label = item.display.toLowerCase();
+          if (label.includes("select")) selectCards.push(item);
+          else others.push(item);
+        });
+        return [...selectCards, ...others];
+      };
+      cc = reorderBySelect(cc);
+      dc = reorderBySelect(dc);
+    }
+
+    /** --- SPECIAL CASE 2: if query hints debit/DC → show Debit section first --- */
     const isDebitIntent =
-      s.includes("debit") ||
-      /\bdebit\s*card(s)?\b/i.test(val) ||
-      /\bdc\b/i.test(val);
+      qLower.includes("debit card") ||
+      qLower.includes("debit") ||
+      qLower === "dc" ||
+      qLower.startsWith("dc ") ||
+      qLower.endsWith(" dc") ||
+      qLower.includes(" dc ");
 
     setNoMatches(false);
+
     if (isDebitIntent) {
+      // Debit cards first, then credit cards
       setFilteredCards([
         ...(dc.length ? [{ type: "heading", label: "Debit Cards" }] : []),
         ...dc,
@@ -497,6 +577,7 @@ const AirlineOffers = () => {
         ...cc,
       ]);
     } else {
+      // Default: Credit cards first, then debit cards
       setFilteredCards([
         ...(cc.length ? [{ type: "heading", label: "Credit Cards" }] : []),
         ...cc,
@@ -644,7 +725,8 @@ const AirlineOffers = () => {
 
           {showVariantNote && (
             <p className="network-note">
-              <strong>Note:</strong> This benefit is applicable only on <em>{wrapper.variantText}</em> variant
+              <strong>Note:</strong> This benefit is applicable only on{" "}
+              <em>{wrapper.variantText}</em> variant
             </p>
           )}
 
@@ -689,15 +771,23 @@ const AirlineOffers = () => {
 
           {/* Credit strip */}
           {chipCC.length > 0 && (
-            <marquee direction="left" scrollamount="4" style={{ marginBottom: 8, whiteSpace: "nowrap" }}>
-              <strong style={{ marginRight: 10, color: "#1F2D45" }}>Credit Cards:</strong>
+            <marquee
+              direction="left"
+              scrollamount="4"
+              style={{ marginBottom: 8, whiteSpace: "nowrap" }}
+            >
+              <strong style={{ marginRight: 10, color: "#1F2D45" }}>
+                Credit Cards:
+              </strong>
               {chipCC.map((name, idx) => (
                 <span
                   key={`cc-chip-${idx}`}
                   role="button"
                   tabIndex={0}
                   onClick={() => handleChipClick(name, "credit")}
-                  onKeyDown={(e) => (e.key === "Enter" ? handleChipClick(name, "credit") : null)}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" ? handleChipClick(name, "credit") : null
+                  }
                   style={{
                     display: "inline-block",
                     padding: "6px 10px",
@@ -711,8 +801,12 @@ const AirlineOffers = () => {
                     lineHeight: 1.2,
                     userSelect: "none",
                   }}
-                  onMouseOver={(e) => (e.currentTarget.style.background = "#F0F5FF")}
-                  onMouseOut={(e) => (e.currentTarget.style.background = "#fff")}
+                  onMouseOver={(e) =>
+                    (e.currentTarget.style.background = "#F0F5FF")
+                  }
+                  onMouseOut={(e) =>
+                    (e.currentTarget.style.background = "#fff")
+                  }
                   title="Click to select this card"
                 >
                   {name}
@@ -723,15 +817,23 @@ const AirlineOffers = () => {
 
           {/* Debit strip */}
           {chipDC.length > 0 && (
-            <marquee direction="left" scrollamount="4" style={{ whiteSpace: "nowrap" }}>
-              <strong style={{ marginRight: 10, color: "#1F2D45" }}>Debit Cards:</strong>
+            <marquee
+              direction="left"
+              scrollamount="4"
+              style={{ whiteSpace: "nowrap" }}
+            >
+              <strong style={{ marginRight: 10, color: "#1F2D45" }}>
+                Debit Cards:
+              </strong>
               {chipDC.map((name, idx) => (
                 <span
                   key={`dc-chip-${idx}`}
                   role="button"
                   tabIndex={0}
                   onClick={() => handleChipClick(name, "debit")}
-                  onKeyDown={(e) => (e.key === "Enter" ? handleChipClick(name, "debit") : null)}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" ? handleChipClick(name, "debit") : null
+                  }
                   style={{
                     display: "inline-block",
                     padding: "6px 10px",
@@ -745,8 +847,12 @@ const AirlineOffers = () => {
                     lineHeight: 1.2,
                     userSelect: "none",
                   }}
-                  onMouseOver={(e) => (e.currentTarget.style.background = "#F0F5FF")}
-                  onMouseOut={(e) => (e.currentTarget.style.background = "#fff")}
+                  onMouseOver={(e) =>
+                    (e.currentTarget.style.background = "#F0F5FF")
+                  }
+                  onMouseOut={(e) =>
+                    (e.currentTarget.style.background = "#fff")
+                  }
                   title="Click to select this card"
                 >
                   {name}
@@ -758,7 +864,10 @@ const AirlineOffers = () => {
       )}
 
       {/* Search / dropdown */}
-      <div className="dropdown" style={{ position: "relative", width: "600px", margin: "20px auto" }}>
+      <div
+        className="dropdown"
+        style={{ position: "relative", width: "600px", margin: "20px auto" }}
+      >
         <input
           type="text"
           value={query}
@@ -792,7 +901,14 @@ const AirlineOffers = () => {
           >
             {filteredCards.map((item, idx) =>
               item.type === "heading" ? (
-                <li key={`h-${idx}`} style={{ padding: "8px 10px", fontWeight: 700, background: "#fafafa" }}>
+                <li
+                  key={`h-${idx}`}
+                  style={{
+                    padding: "8px 10px",
+                    fontWeight: 700,
+                    background: "#fafafa",
+                  }}
+                >
                   {item.label}
                 </li>
               ) : (
@@ -804,8 +920,12 @@ const AirlineOffers = () => {
                     cursor: "pointer",
                     borderBottom: "1px solid #f2f2f2",
                   }}
-                  onMouseOver={(e) => (e.currentTarget.style.background = "#f7f9ff")}
-                  onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
+                  onMouseOver={(e) =>
+                    (e.currentTarget.style.background = "#f7f9ff")
+                  }
+                  onMouseOut={(e) =>
+                    (e.currentTarget.style.background = "transparent")
+                  }
                 >
                   {item.display}
                 </li>
@@ -823,7 +943,10 @@ const AirlineOffers = () => {
 
       {/* Offers by section */}
       {selected && hasAny && !noMatches && (
-        <div className="offers-section" style={{ maxWidth: 1200, margin: "0 auto", padding: 20 }}>
+        <div
+          className="offers-section"
+          style={{ maxWidth: 1200, margin: "0 auto", padding: 20 }}
+        >
           {!!dSwiggy.length && (
             <div className="offer-group">
               <h2 style={{ textAlign: "center" }}>Offers On Swiggy</h2>
@@ -856,7 +979,9 @@ const AirlineOffers = () => {
 
       {selected && hasAny && !noMatches && (
         <button
-          onClick={() => window.scrollBy({ top: window.innerHeight, behavior: "smooth" })}
+          onClick={() =>
+            window.scrollBy({ top: window.innerHeight, behavior: "smooth" })
+          }
           style={{
             position: "fixed",
             right: 20,
