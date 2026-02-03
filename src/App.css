@@ -70,6 +70,8 @@ body{
   font-size:16px;
   line-height:1.65;
   margin:0 0 10px 0;
+  height:120px;
+  overflow-y:auto;
 }
 
 /* permanent offers extra line */
@@ -121,6 +123,17 @@ ul li{
   transition:background-color .2s ease;
 }
 ul li:hover{ background:#f0f0f0; }
+
+/* ----------------  Marquee Chips  ---------------- */
+marquee{
+  display:block;
+}
+marquee [role="button"]{
+  transition: background-color .2s ease, transform .05s ease;
+}
+marquee [role="button"]:active{
+  transform:scale(0.98);
+}
 
 /* ----------------  Disclaimer (as before)  ---------------- */
 .disclaimer{
