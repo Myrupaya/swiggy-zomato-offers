@@ -775,6 +775,23 @@ const AirlineOffers = () => {
   const hasAny = Boolean(dSwiggy.length || dZomato.length);
 
   /** Offer card UI (Swiggy/Zomato) with image fallback handling */
+  const copyCoupon = async (code) => {
+    const text = String(code || "").trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+  };
+
   const OfferCard = ({ wrapper }) => {
     const o = wrapper.offer;
 
@@ -787,6 +804,11 @@ const AirlineOffers = () => {
     const desc =
       o["Description"] ||
       firstField(o, LIST_FIELDS.desc) ||
+      "";
+    const coupon =
+      o["Coupon Code"] ||
+      o["Coupon"] ||
+      o["Code"] ||
       "";
     const candidateImage =
       o["Images"] ||
@@ -817,17 +839,32 @@ const AirlineOffers = () => {
           <h3 className="offer-title">{title}</h3>
           {desc && <p className="offer-desc">{desc}</p>}
 
-          {showVariantNote && (
-            <p className="network-note">
-              <strong>Note:</strong> This benefit is applicable only on{" "}
-              <em>{wrapper.variantText}</em> variant
-            </p>
+          {coupon && (
+            <div className="coupon-wrap">
+              <div className="coupon-title">Coupon Code</div>
+              <button
+                type="button"
+                className="coupon-code"
+                onClick={() => copyCoupon(coupon)}
+                title="Click to copy coupon code"
+              >
+                <span className="coupon-value">{coupon}</span>
+                <span className="coupon-hint">Click to copy</span>
+              </button>
+            </div>
           )}
 
           {link && (
             <button className="btn" onClick={() => window.open(link, "_blank")}>
               View Offer
             </button>
+          )}
+
+          {showVariantNote && (
+            <p className="network-note">
+              <strong>Note:</strong> This benefit is applicable only on{" "}
+              <em>{wrapper.variantText}</em> variant
+            </p>
           )}
         </div>
       </div>
