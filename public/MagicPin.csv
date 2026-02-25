@@ -1,4 +1,8 @@
-Offer,Description,Coupon Code,Image,Link,Eligible Credit Cards,Eligible Debit Cards,Net Banking,UPI,Non-Payments-Offers
-POP,Up to 100 cashback,,,https://magicpin.in,,,,POP UPI,
-POP,Flat 100 cashback | Above 299,,,https://magicpin.in,,,,POP UPI,
-Zagg,Get 40% cashback up to 200,,,https://magicpin.in,Yes Bank Zagg Credit Card,,,,
+Offer,Description,Coupon Code,Image,Link,Eligible Credit Cards,Eligible Debit Cards,Net Banking,UPI,Non-Payments-Offers,,,,,,,,,,,,,,,,
+POP,Up to 100 cashback,,,https://magicpin.in,,,,POP UPI,,,,,,,,,,,,,,,,,
+POP,Flat 100 cashback | Above 299,,,https://magicpin.in,,,,POP UPI,,,,,,,,,,,,,,,,,
+Zagg,Get 40% cashback up to 200,,,https://magicpin.in,Yes Bank Zagg Credit Card,,,,,,,,,,,,,,,,,,,,
+BHIM,Up to Rs. 100 Cashback | Above Rs. 150,,,magicpin.in,,,,BHIM UPI,,,,,,,,,,,,,,,,,
+PayTM,Rs. 15-Rs. 200 cashback + Gold Coins,,,magicpin.in,,,,PayTM UPI,,,,,,,,,,,,,,,,,
+MobiKwik,Flat Rs. 100 Cashback | Above Rs. 249,,,magicpin.in,,,,MobiKwik UPI,,,,,,,,,,,,,,,,,
+Jupiter,Flat Rs. 150 cashback | Above Rs. 199,,,magicpin.in,,,,Jupiter UPI,,,,,,,,,,,,,,,,,
