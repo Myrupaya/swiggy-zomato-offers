@@ -27,6 +27,8 @@ const FALLBACK_IMAGE_BY_SITE = {
     "https://bsmedia.business-standard.com/_media/bs/img/article/2023-07/17/full/1689574606-2001.png",
   zomato:
     "https://c.ndtvimg.com/2024-06/mr51ho8o_zomato-logo-stock-image_625x300_03_June_24.jpg?im=FeatureCrop,algorithm=dnn,width=545,height=307",
+  eatsure:
+    "https://cdn.gyftr.com/sbiapp/images/brands/logos/9930_Logo.png",
   magicpin:
     "https://static.magicpin.com/samara/static/images/home/about-us/magicpin-logo.svg",
 };
@@ -336,6 +338,7 @@ const AirlineOffers = () => {
   // offers (ONLY these 2 CSVs)
   const [swiggyOffers, setSwiggyOffers] = useState([]);
   const [zomatoOffers, setZomatoOffers] = useState([]);
+  const [eatsureOffers, setEatsureOffers] = useState([]);
   const [magicPinOffers, setMagicPinOffers] = useState([]);
 
   // responsive
@@ -439,13 +442,14 @@ const AirlineOffers = () => {
     loadAllCards();
   }, []);
 
-  // 2) Load offer CSVs (ONLY: swiggy, zomato)
+  // 2) Load offer CSVs
   useEffect(() => {
     async function loadOffers() {
       try {
         const files = [
           { name: "Swiggy.csv", setter: setSwiggyOffers },
           { name: "Zomato.csv", setter: setZomatoOffers },
+          { name: "Eatsure.csv", setter: setEatsureOffers },
           { name: "MagicPin.csv", setter: setMagicPinOffers },
         ];
 
@@ -531,9 +535,10 @@ const AirlineOffers = () => {
       }
     };
 
-    // Only Swiggy + Zomato + MagicPin feed the marquee chips
+    // Offer CSVs feed the marquee chips
     harvestRows(swiggyOffers);
     harvestRows(zomatoOffers);
+    harvestRows(eatsureOffers);
     harvestRows(magicPinOffers);
 
     const upiChips = Array.from(upiMap.values()).sort((a, b) => a.localeCompare(b));
@@ -565,7 +570,7 @@ const AirlineOffers = () => {
         mergeEntries(prev, nbChips.map((d) => makeEntry(d, "netbanking")))
       );
     }
-  }, [swiggyOffers, zomatoOffers, magicPinOffers]);
+  }, [swiggyOffers, zomatoOffers, eatsureOffers, magicPinOffers]);
 
   /** 🔹 UPDATED search box:
    *  - Fuzzy match for any typo (e.g. "selct")
@@ -772,14 +777,18 @@ const AirlineOffers = () => {
   // Collect then global-dedup
   const wSwiggy = matchesFor(swiggyOffers, selected?.type, "Swiggy");
   const wZomato = matchesFor(zomatoOffers, selected?.type, "Zomato");
+  const wEatsure = matchesFor(eatsureOffers, selected?.type, "Eatsure");
   const wMagicPin = matchesFor(magicPinOffers, selected?.type, "MagicPin");
 
   const seen = new Set();
   const dSwiggy = dedupWrappers(wSwiggy, seen);
   const dZomato = dedupWrappers(wZomato, seen);
+  const dEatsure = dedupWrappers(wEatsure, seen);
   const dMagicPin = dedupWrappers(wMagicPin, seen);
 
-  const hasAny = Boolean(dSwiggy.length || dZomato.length || dMagicPin.length);
+  const hasAny = Boolean(
+    dSwiggy.length || dZomato.length || dEatsure.length || dMagicPin.length
+  );
 
   /** Offer card UI (Swiggy/Zomato) with image fallback handling */
   const copyCoupon = async (code) => {
@@ -1159,6 +1168,17 @@ const AirlineOffers = () => {
               <div className="offer-grid">
                 {dZomato.map((w, i) => (
                   <OfferCard key={`zo-${i}`} wrapper={w} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!!dEatsure.length && (
+            <div className="offer-group">
+              <h2 style={{ textAlign: "center" }}>Offers On Eatsure</h2>
+              <div className="offer-grid">
+                {dEatsure.map((w, i) => (
+                  <OfferCard key={`es-${i}`} wrapper={w} />
                 ))}
               </div>
             </div>
